@@ -1,1 +1,1 @@
-# Affordance-VIS
+# Affordance-Detection-on-Video
