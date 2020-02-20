@@ -44,7 +44,7 @@ def load_mask(mask_path):
 
     _mask = np.zeros((mask.shape[0], mask.shape[1], 1))
     if mask.shape[2] == 1 :
-        non_zero = np.array(mask.nonzero())
+        non_zero = mask.nonzero() ## can not transformed into array !!!!
         _mask[non_zero] = 1
     elif mask.shape[2] == 3 :
         pass

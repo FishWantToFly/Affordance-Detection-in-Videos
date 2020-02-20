@@ -12,6 +12,9 @@ import torch.nn.functional as F
 __all__ = ['HourglassNet', 'hg']
 
 class Bottleneck(nn.Module):
+    '''
+    A residual module
+    '''
     expansion = 2
 
     def __init__(self, inplanes, planes, stride=1, downsample=None):
@@ -76,12 +79,12 @@ class Hourglass(nn.Module):
         return nn.ModuleList(hg)
 
     def _hour_glass_forward(self, n, x):
-        up1 = self.hg[n-1][0](x)
+        up1 = self.hg[n-1][0](x) # also a residual block, will be bypassed to deeper layer
         low1 = F.max_pool2d(x, 2, stride=2)
         low1 = self.hg[n-1][1](low1)
 
         if n > 1:
-            low2 = self._hour_glass_forward(n-1, low1)
+            low2 = self._hour_glass_forward(n-1, low1) # called by recursive
         else:
             low2 = self.hg[n-1][3](low1)
         low3 = self.hg[n-1][2](low2)
@@ -98,19 +101,19 @@ class HourglassNet(nn.Module):
     def __init__(self, block, num_stacks=2, num_blocks=4, num_classes=16):
         super(HourglassNet, self).__init__()
 
-        self.inplanes = 64
+        self.inplanes = 64 # feature dim after "input -> conv" at start ?
         self.num_feats = 128
         self.num_stacks = num_stacks
         self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
                                bias=True)
         self.bn1 = nn.BatchNorm2d(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
-        self.layer1 = self._make_residual(block, self.inplanes, 1)
+        # layer1 to layer3 are placed in front of stacked hourglass model
+        self.layer1 = self._make_residual(block, self.inplanes, 1) # block = bottleneck
         self.layer2 = self._make_residual(block, self.inplanes, 1)
         self.layer3 = self._make_residual(block, self.num_feats, 1)
         self.maxpool = nn.MaxPool2d(2, stride=2)
 
-        # build hourglass modules
         ch = self.num_feats*block.expansion
         hg, res, fc, score, fc_, score_ = [], [], [], [], [], []
         for i in range(num_stacks):
@@ -125,10 +128,14 @@ class HourglassNet(nn.Module):
         self.res = nn.ModuleList(res)
         self.fc = nn.ModuleList(fc)
         self.score = nn.ModuleList(score)
-        self.fc_ = nn.ModuleList(fc_)
-        self.score_ = nn.ModuleList(score_)
+        self.fc_ = nn.ModuleList(fc_) # reverse feature_num of fc 
+        self.score_ = nn.ModuleList(score_)  # reverse feature_num of score 
 
     def _make_residual(self, block, planes, blocks, stride=1):
+        '''
+        If blocks = 1 : equal to generate a single residual module
+        If blokcs > 1 : a residual module appends with more resiual modules
+        '''
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
@@ -145,6 +152,9 @@ class HourglassNet(nn.Module):
         return nn.Sequential(*layers)
 
     def _make_fc(self, inplanes, outplanes):
+        '''
+        1x1 conv
+        '''
         bn = nn.BatchNorm2d(inplanes)
         conv = nn.Conv2d(inplanes, outplanes, kernel_size=1, bias=True)
         return nn.Sequential(
@@ -161,19 +171,19 @@ class HourglassNet(nn.Module):
 
         x = self.layer1(x)
         x = self.maxpool(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-
+        x = self.layer2(x) # layer before stacked hourgasss model
+        x = self.layer3(x) # layer before stacked hourgasss model
+        
         for i in range(self.num_stacks):
             y = self.hg[i](x)
             y = self.res[i](y)
             y = self.fc[i](y)
-            score = self.score[i](y)
-            out.append(score)
+            score = self.score[i](y) # score is like predicted logits ?
+            out.append(score) # for computing intermediate loss
             if i < self.num_stacks-1:
                 fc_ = self.fc_[i](y)
                 score_ = self.score_[i](score)
-                x = x + fc_ + score_
+                x = x + fc_ + score_ # identity + fc_ (no semantic) + score_ (semantic)
 
         return out
 

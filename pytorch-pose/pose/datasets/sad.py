@@ -33,9 +33,9 @@ class Sad(data.Dataset):
 
         self.dataset_list_dir_path = kwargs['dataset_list_dir_path']
         # contain img and annotation
-        self.train_list = self.load_full_file_list('train_10')
-        # self.train_list = self.load_full_file_list('train')
-        # self.valid_list = self.load_full_file_list('test')
+        # self.train_list = self.load_full_file_list('train_10')
+        self.train_list = self.load_full_file_list('train')
+        self.valid_list = self.load_full_file_list('test')
 
     def load_full_file_list(self, mode):
         all_files = []
@@ -62,8 +62,8 @@ class Sad(data.Dataset):
     def __getitem__(self, index):
         if self.is_train:
             img_path, mask_path = self.train_list[index]
-        # else    :
-        #     img_path, mask_path = self.test_files[index]
+        else    :
+            img_path, mask_path = self.valid_list[index]
 
         # load image and mask
         img = load_image(img_path)  # CxHxW
@@ -100,14 +100,11 @@ class Sad(data.Dataset):
             target[i] = resize(a[i], self.out_res, self.out_res)
             pass
 
-
-
         # Meta info
         # meta = {'index' : index, 'pts' : pts, 'tpts' : tpts, 'target_weight': target_weight}
         meta = {'index' : index, 'target_weight': target_weight}
         
         return inp, target, meta
-        # return inp, meta
 
     def __len__(self):
         if self.is_train:
