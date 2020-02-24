@@ -14,10 +14,10 @@ import torchvision.datasets as datasets
 import _init_paths
 from pose import Bar
 from pose.utils.logger import Logger, savefig
-from pose.utils.evaluation import accuracy, AverageMeter, final_preds
+from pose.utils.evaluation import accuracy, AverageMeter, final_preds, intersectionOverUnion
 from pose.utils.misc import save_checkpoint, save_pred, adjust_learning_rate
 from pose.utils.osutils import mkdir_p, isfile, isdir, join
-from pose.utils.imutils import batch_with_heatmap
+from pose.utils.imutils import batch_with_heatmap, sample_test
 from pose.utils.transforms import fliplr, flip_back
 import pose.models as models
 import pose.datasets as datasets
@@ -38,6 +38,7 @@ dataset_names = sorted(name for name in datasets.__dict__
 
 # init global variables
 best_acc = 0
+best_iou = 0
 idx = []
 
 # select proper device to run
@@ -47,6 +48,7 @@ cudnn.benchmark = True  # There is BN issue for early version of PyTorch
 
 def main(args):
     global best_acc
+    global best_iou
     global idx
 
     # idx is the index of joints used to compute accuracy
@@ -111,7 +113,7 @@ def main(args):
     else:
         logger = Logger(join(args.checkpoint, 'log.txt'), title=title)
         logger.set_names(['Epoch', 'LR', 'Train Loss', 'Val Loss',
-                          'Train Acc', 'Val Acc'])
+                          'Train Acc', 'Val Acc', 'Val IoU'])
 
     print('    Total params: %.2fM'
           % (sum(p.numel() for p in model.parameters())/1000000.0))
@@ -139,12 +141,60 @@ def main(args):
         num_workers=args.workers, pin_memory=True
     )
 
+    # write line-chart
+    if args.write:
+        list_of_lists = []
+        with open(os.path.join(args.checkpoint, 'log.txt')) as f:
+            for line in f:
+                inner_list = [elt.strip() for elt in line.split('\t')]
+                # in alternative, if you need to use the file content as numbers
+                # inner_list = [int(elt.strip()) for elt in line.split(',')]
+                list_of_lists.append(inner_list)
+        epoch_idx_list, train_acc_list, val_acc_list = [], [], []
+        train_loss_list, val_loss_list = [], []
+        val_iou_list = []
+        list_len = len(list_of_lists)
+        for i in range(1, list_len):
+            epoch_idx_list.append(i)
+            train_loss_list.append(float(list_of_lists[i][2]))
+            val_loss_list.append(float(list_of_lists[i][3]))
+            train_acc_list.append(float(list_of_lists[i][4]))
+            val_acc_list.append(float(list_of_lists[i][5]))
+            val_iou_list.append(float(list_of_lists[i][6]))
+
+        plt.xlabel('Epoch')
+        plt.plot(epoch_idx_list, train_loss_list)
+        plt.plot(epoch_idx_list, val_loss_list)
+        plt.legend(['Train loss', 'Val loss'], loc='upper left')
+        plt.savefig(os.path.join(args.checkpoint, 'log_loss.png'))
+        plt.cla()
+
+        plt.xlabel('Epoch')
+        plt.plot(epoch_idx_list, train_acc_list)
+        plt.plot(epoch_idx_list, val_acc_list)
+        plt.legend(['Train acc', 'Val acc'], loc='upper left')
+        plt.savefig(os.path.join(args.checkpoint, 'log_acc.png'))
+        plt.cla()
+
+        plt.xlabel('Epoch')
+        plt.plot(epoch_idx_list, val_iou_list)
+        plt.legend(['Val iou'], loc='upper left')
+        plt.savefig(os.path.join(args.checkpoint, 'log_iou.png'))
+        plt.cla()
+
+        return
+
     # evaluation only
+    global JUST_EVALUATE
+    JUST_EVALUATE = False
     if args.evaluate:
         print('\nEvaluation only')
-        loss, acc, predictions = validate(val_loader, model, criterion, njoints,
+        JUST_EVALUATE = True
+        loss, acc, iou, predictions = validate(val_loader, model, criterion, njoints,
                                           args.debug, args.flip)
-        save_pred(predictions, checkpoint=args.checkpoint)
+        # save_pred(predictions, checkpoint=args.checkpoint)
+        print("Average acc : ")
+        print(acc)
         return
 
     # train and eval
@@ -163,26 +213,68 @@ def main(args):
                                       args.debug, args.flip)
 
         # evaluate on validation set
-        valid_loss, valid_acc, predictions = validate(val_loader, model, criterion,
+        valid_loss, valid_acc, valid_iou, predictions = validate(val_loader, model, criterion,
                                                   njoints, args.debug, args.flip)
 
         # append logger file
-        logger.append([epoch + 1, lr, train_loss, valid_loss, train_acc, valid_acc])
+        logger.append([epoch + 1, lr, train_loss, valid_loss, train_acc, valid_acc, valid_iou])
 
         # remember best acc and save checkpoint
         is_best = valid_acc > best_acc
+        is_best_iou = valid_iou > best_iou
         best_acc = max(valid_acc, best_acc)
+        best_iou = max(valid_iou, best_iou)
         save_checkpoint({
             'epoch': epoch + 1,
             'arch': args.arch,
             'state_dict': model.state_dict(),
             'best_acc': best_acc,
+            'best_iou': best_iou,
             'optimizer' : optimizer.state_dict(),
-        }, predictions, is_best, checkpoint=args.checkpoint, snapshot=args.snapshot)
+        }, predictions, is_best, is_best_iou, checkpoint=args.checkpoint, snapshot=args.snapshot)
 
     logger.close()
-    logger.plot(['Train Acc', 'Val Acc'])
-    savefig(os.path.join(args.checkpoint, 'log.eps'))
+    # logger.plot(['Train Acc', 'Val Acc'])
+    # savefig(os.path.join(args.checkpoint, 'log.eps'))
+
+    # in the end
+    list_of_lists = []
+    with open(os.path.join(args.checkpoint, 'log.txt')) as f:
+        for line in f:
+            inner_list = [elt.strip() for elt in line.split('\t')]
+            # in alternative, if you need to use the file content as numbers
+            # inner_list = [int(elt.strip()) for elt in line.split(',')]
+            list_of_lists.append(inner_list)
+    epoch_idx_list, train_acc_list, val_acc_list = [], [], []
+    train_loss_list, val_loss_list = [], []
+    list_len = len(list_of_lists)
+    for i in range(1, list_len):
+        epoch_idx_list.append(i)
+        train_loss_list.append(float(list_of_lists[i][2]))
+        val_loss_list.append(float(list_of_lists[i][3]))
+        train_acc_list.append(float(list_of_lists[i][4]))
+        val_acc_list.append(float(list_of_lists[i][5]))
+
+
+    plt.xlabel('Epoch')
+    plt.plot(epoch_idx_list, train_loss_list)
+    plt.plot(epoch_idx_list, val_loss_list)
+    plt.legend(['Train loss', 'Val loss'], loc='upper left')
+    plt.savefig(os.path.join(args.checkpoint, 'log_loss.png'))
+    plt.cla()
+
+    plt.xlabel('Epoch')
+    plt.plot(epoch_idx_list, train_acc_list)
+    plt.plot(epoch_idx_list, val_acc_list)
+    plt.legend(['Train acc', 'Val acc'], loc='upper left')
+    plt.savefig(os.path.join(args.checkpoint, 'log_acc.png'))
+    plt.cla()
+
+    plt.xlabel('Epoch')
+    plt.plot(epoch_idx_list, val_iou_list)
+    plt.legend(['Val iou'], loc='upper left')
+    plt.savefig(os.path.join(args.checkpoint, 'log_iou.png'))
+    plt.cla()
 
 
 def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
@@ -215,7 +307,7 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
         else:  # single output
             loss = criterion(output, target, target_weight)
         acc = accuracy(output, target, idx)
-
+        
         if debug: # visualize groundtruth and predictions
             gt_batch_img = batch_with_heatmap(input, target)
             pred_batch_img = batch_with_heatmap(input, output)
@@ -267,6 +359,7 @@ def validate(val_loader, model, criterion, num_classes, debug=False, flip=True):
     data_time = AverageMeter()
     losses = AverageMeter()
     acces = AverageMeter()
+    ioues = AverageMeter()
 
     # predictions
     predictions = torch.Tensor(val_loader.dataset.__len__(), num_classes, 2)
@@ -275,6 +368,7 @@ def validate(val_loader, model, criterion, num_classes, debug=False, flip=True):
     model.eval()
 
     gt_win, pred_win = None, None
+    iou = None
     end = time.time()
     bar = Bar('Eval ', max=len(val_loader))
     with torch.no_grad():
@@ -307,30 +401,41 @@ def validate(val_loader, model, criterion, num_classes, debug=False, flip=True):
                 loss = criterion(output, target, target_weight)
 
             acc = accuracy(score_map, target.cpu(), idx)
+            iou = intersectionOverUnion(output.cpu(), target.cpu(), idx) # have not tested
 
             # generate predictions
             # preds = final_preds(score_map, meta['center'], meta['scale'], [64, 64])
             # for n in range(score_map.size(0)):
             #     predictions[meta['index'][n], :, :] = preds[n, :, :]
 
+            '''
+            if debug:
+                # show input
+                gt_batch_img = sample_test(input)
+                if not gt_win or not pred_win:
+                    gt_win = plt.imshow(gt_batch_img)
+                else:
+                    gt_win.set_data(gt_batch_img)
+                plt.pause(.5)
+                plt.draw()
+            '''
 
             if debug:
                 gt_batch_img = batch_with_heatmap(input, target)
-                pred_batch_img = batch_with_heatmap(input, score_map)
+                # pred_batch_img = batch_with_heatmap(input, score_map)
                 if not gt_win or not pred_win:
-                    plt.subplot(121)
+                    plt.plot()
                     gt_win = plt.imshow(gt_batch_img)
-                    plt.subplot(122)
-                    pred_win = plt.imshow(pred_batch_img)
                 else:
                     gt_win.set_data(gt_batch_img)
-                    pred_win.set_data(pred_batch_img)
-                plt.pause(.05)
+                # plt.pause(.05)
+                plt.pause(.5)
                 plt.draw()
 
             # measure accuracy and record loss
             losses.update(loss.item(), input.size(0))
             acces.update(acc[0], input.size(0))
+            ioues.update(iou, input.size(0))
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -350,7 +455,10 @@ def validate(val_loader, model, criterion, num_classes, debug=False, flip=True):
             bar.next()
 
         bar.finish()
-    return losses.avg, acces.avg, predictions
+    
+    print("IoU: ")
+    print("%.3f" % (ioues.avg))
+    return losses.avg, acces.avg, ioues.avg, predictions
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
@@ -405,13 +513,21 @@ if __name__ == '__main__':
                         help='number of total epochs to run')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                         help='manual epoch number (useful on restarts)')
-    ## testing now
-    # original is 6
+
+    # 2 GPU setting
     parser.add_argument('--train-batch', default=30, type=int, metavar='N',
                         help='train batchsize')
     parser.add_argument('--test-batch', default=10, type=int, metavar='N',
                         help='test batchsize')
-    parser.add_argument('--lr', '--learning-rate', default=2.5e-4, type=float,
+
+    # single GPU setting (have not tested)
+    # parser.add_argument('--train-batch', default=8, type=int, metavar='N',
+    #                     help='train batchsize')
+    # parser.add_argument('--test-batch', default=4, type=int, metavar='N',
+    #                     help='test batchsize')
+
+    # 2020.2.24 2.5e-4 -> 2.0e-4
+    parser.add_argument('--lr', '--learning-rate', default=2e-4, type=float,
                         metavar='LR', help='initial learning rate')
     parser.add_argument('--momentum', default=0, type=float, metavar='M',
                         help='momentum')
@@ -441,14 +557,18 @@ if __name__ == '__main__':
     # Miscs
     parser.add_argument('-c', '--checkpoint', default='checkpoint', type=str, metavar='PATH',
                         help='path to save checkpoint (default: checkpoint)')
-    parser.add_argument('--snapshot', default=5, type=int,
+    parser.add_argument('--snapshot', default=20, type=int,
                         help='save models for every #snapshot epochs (default: 0)')
+    # ./checkpoint/checkpoint_30.pth.tar
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='path to latest checkpoint (default: none)')
     parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                         help='evaluate model on validation set')
     parser.add_argument('-d', '--debug', dest='debug', action='store_true',
                         help='show intermediate results')
+    parser.add_argument('-w', '--write', dest='write', action='store_true',
+                        help='wirte acc / loss curve')
+
 
 
     main(parser.parse_args())

@@ -21,8 +21,6 @@ def im_to_torch(img):
     return img
 
 def im_to_torch_no_normalize(img):
-    # img = np.array(Image.fromarray(img).resize((480, 480)))
-    # print("666")
     img = np.transpose(img, (2, 0, 1)) # C*H*W
     img = to_torch(img).float()
     return img
@@ -53,11 +51,12 @@ def load_mask(mask_path):
 
 def resize(img, owidth, oheight):  # CxHxW -> HxWxC
     img = to_numpy(img)
-    img = np.reshape(img, (640, 480, -1))
-    
-    # for mask
-    if img.shape[2] == 1:
-        img = np.reshape(img, (640, 480))
+    if img.ndim == 2:
+        pass
+    elif img.ndim == 3 :
+        img = np.transpose(img, (1, 2, 0))
+        if img.shape[2] == 1:
+            img = np.squeeze(img, -1)
 
     img = np.asarray(img, dtype = np.uint8)
 
@@ -130,13 +129,16 @@ def gauss(x, a, b, c, d=0):
     return a * np.exp(-(x - b)**2 / (2 * c**2)) + d
 
 def color_heatmap(x):
-    x = to_numpy(x)
+    x = to_numpy(x) # 256x256
     color = np.zeros((x.shape[0],x.shape[1],3))
-    color[:,:,0] = gauss(x, .5, .6, .2) + gauss(x, 1, .8, .3)
-    color[:,:,1] = gauss(x, 1, .5, .3)
-    color[:,:,2] = gauss(x, 1, .2, .3)
-    color[color > 1] = 1
+    # color[:,:,0] = gauss(x, .5, .6, .2) + gauss(x, 1, .8, .3)
+    # color[:,:,1] = gauss(x, 1, .5, .3)
+    # color[:,:,2] = gauss(x, 1, .2, .3)
+    gt_pos = (x != 0).nonzero()
+    pos_0, pos_1 = gt_pos
+    color[pos_0, pos_1, 0] = 1
     color = (color * 255).astype(np.uint8)
+
     return color
 
 def imshow(img):
@@ -168,6 +170,14 @@ def show_sample(inputs, target):
         imshow(out)
         plt.show()
 
+def sample_test(inp):
+    inp = to_numpy(inp[0] * 255)
+    img = np.zeros((inp.shape[1], inp.shape[2], inp.shape[0]))
+    for i in range(3):
+        img[:, :, i] = inp[i, :, :]
+    img = np.asarray(img, np.uint8)
+    return img
+
 def sample_with_heatmap(inp, out, num_rows=2, parts_to_show=None):
     inp = to_numpy(inp * 255)
     out = to_numpy(out)
@@ -176,37 +186,37 @@ def sample_with_heatmap(inp, out, num_rows=2, parts_to_show=None):
     for i in range(3):
         img[:, :, i] = inp[i, :, :]
 
-    if parts_to_show is None:
-        parts_to_show = np.arange(out.shape[0])
+    img = np.asarray(img, np.uint8)
+    # print(img.shape) # 256 256 3
 
-    # Generate a single image to display input/output pair
-    num_cols = int(np.ceil(float(len(parts_to_show)) / num_rows))
-    size = img.shape[0] // num_rows
+    size = img.shape[0] # 256
 
-    full_img = np.zeros((img.shape[0], size * (num_cols + num_rows), 3), np.uint8)
+    full_img = np.zeros((img.shape[0], size * 2, 3), np.uint8) # 256 512 3
     full_img[:img.shape[0], :img.shape[1]] = img
 
-    inp_small = scipy.misc.imresize(img, [size, size])
+    inp_small = np.array(Image.fromarray(img).resize((size, size)))
 
-    # Set up heatmap display for each part
-    for i, part in enumerate(parts_to_show):
-        part_idx = part
-        out_resized = scipy.misc.imresize(out[part_idx], [size, size])
-        out_resized = out_resized.astype(float)/255
-        out_img = inp_small.copy() * .3
-        color_hm = color_heatmap(out_resized)
-        out_img += color_hm * .7
+    part_idx = 0
+    out_resized = np.array(Image.fromarray(out[part_idx]).resize((size, size)))
+    out_resized = out_resized.astype(float)/255
+    
+    # print(out_resized.shape) # 256 256
+    color_hm = color_heatmap(out_resized)
+    out_img = inp_small.copy() * .3
+    out_img += color_hm * .7
+    # out_img = color_hm.copy()
 
-        col_offset = (i % num_cols + num_rows) * size
-        row_offset = (i // num_cols) * size
-        full_img[row_offset:row_offset + size, col_offset:col_offset + size] = out_img
+
+    # full_img[row_offset:row_offset + size, col_offset:col_offset + size] = out_img
+    full_img[0: size, 256:256 + size] = out_img
 
     return full_img
 
 def batch_with_heatmap(inputs, outputs, mean=torch.Tensor([0.5, 0.5, 0.5]).cuda(), num_rows=2, parts_to_show=None):
     batch_img = []
-    for n in range(min(inputs.size(0), 4)):
-        inp = inputs[n] + mean.view(3, 1, 1).expand_as(inputs[n])
+    for n in range(min(inputs.size(0), 1)):
+        # inp = inputs[n] + mean.view(3, 1, 1).expand_as(inputs[n])
+        inp = inputs[n]
         batch_img.append(
             sample_with_heatmap(inp.clamp(0, 1), outputs[n], num_rows=num_rows, parts_to_show=parts_to_show)
         )

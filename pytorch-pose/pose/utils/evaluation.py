@@ -96,6 +96,30 @@ def final_preds(output, center, scale, res):
 
     return preds
 
+def intersectionOverUnion(output, target, idxs):
+    ''' 
+    Calculate IoU
+    output : Batch * Class * W * H
+    '''
+    B, C, W, H = output.size(0), output.size(1), output.size(2), output.size(3)
+    output = output.view(B, W, H, C).numpy()
+    target = target.view(B, W, H, C).numpy()
+
+    num_classes = target.shape[-1]
+    THRESHOLD = 0.5
+    y_pred = (target > THRESHOLD).astype(int)
+    y_true = (output > 0).astype(int)
+
+    axes = (1,2) # W,H axes of each image
+    intersection = np.sum(np.abs(y_pred * y_true), axis=axes) # or, np.logical_and(y_pred, y_true) for one-hot # shape = [Batch]
+    mask_sum = np.sum(np.abs(y_true), axis=axes) + np.sum(np.abs(y_pred), axis=axes)
+    union = mask_sum  - intersection # or, np.logical_or(y_pred, y_true) for one-hot
+
+    smooth = .001
+    iou = (intersection + smooth) / (union + smooth) # [C]
+
+    return np.mean(iou)
+
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""

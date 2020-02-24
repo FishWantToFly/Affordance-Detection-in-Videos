@@ -1,5 +1,6 @@
 # Byte-compiled / optimized / DLL files
 checkpoint
+checkpoint*
 dev
 *.pth.tar
 data/mpii/images

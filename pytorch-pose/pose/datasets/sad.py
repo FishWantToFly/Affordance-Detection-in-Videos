@@ -34,8 +34,9 @@ class Sad(data.Dataset):
         self.dataset_list_dir_path = kwargs['dataset_list_dir_path']
         # contain img and annotation
         # self.train_list = self.load_full_file_list('train_10')
+        self.valid_list = self.load_full_file_list('test_10')
         self.train_list = self.load_full_file_list('train')
-        self.valid_list = self.load_full_file_list('test')
+        # self.valid_list = self.load_full_file_list('test')
 
     def load_full_file_list(self, mode):
         all_files = []
@@ -80,7 +81,7 @@ class Sad(data.Dataset):
 
         # Prepare image and groundtruth map
         # inp = crop(img, c, s, [self.inp_res, self.inp_res], rot=r)
-        inp = resize(img, self.inp_res, self.inp_res)
+        inp = resize(img, self.inp_res, self.inp_res) # get normalized rgb value
 
 
         # Generate ground truth
