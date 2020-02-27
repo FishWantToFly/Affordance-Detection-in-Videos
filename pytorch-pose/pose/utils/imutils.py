@@ -128,18 +128,19 @@ def draw_labelmap(img, pt, sigma, type='Gaussian'):
 def gauss(x, a, b, c, d=0):
     return a * np.exp(-(x - b)**2 / (2 * c**2)) + d
 
-def color_heatmap(x):
+def color_heatmap(x, mode):
     x = to_numpy(x) # 256x256
     color = np.zeros((x.shape[0],x.shape[1],3))
-    # color[:,:,0] = gauss(x, .5, .6, .2) + gauss(x, 1, .8, .3)
-    # color[:,:,1] = gauss(x, 1, .5, .3)
-    # color[:,:,2] = gauss(x, 1, .2, .3)
-    gt_pos = (x != 0).nonzero()
+    if mode == 'gt' :
+        gt_pos = (x != 0).nonzero()
+    elif mode == 'pred' :
+        x = x * 255 # because x is normalized before
+        gt_pos = (x >= 0.5).nonzero() # have to exceed threshold
     pos_0, pos_1 = gt_pos
     color[pos_0, pos_1, 0] = 1
     color = (color * 255).astype(np.uint8)
-
     return color
+
 
 def imshow(img):
     npimg = im_to_numpy(img*255).astype(np.uint8)
@@ -178,7 +179,7 @@ def sample_test(inp):
     img = np.asarray(img, np.uint8)
     return img
 
-def sample_with_heatmap(inp, out, num_rows=2, parts_to_show=None):
+def sample_with_heatmap(inp, out, mode, num_rows=2, parts_to_show=None):
     inp = to_numpy(inp * 255)
     out = to_numpy(out)
 
@@ -201,23 +202,22 @@ def sample_with_heatmap(inp, out, num_rows=2, parts_to_show=None):
     out_resized = out_resized.astype(float)/255
     
     # print(out_resized.shape) # 256 256
-    color_hm = color_heatmap(out_resized)
+
+    color_hm = color_heatmap(out_resized, mode)
     out_img = inp_small.copy() * .3
     out_img += color_hm * .7
     # out_img = color_hm.copy()
-
 
     # full_img[row_offset:row_offset + size, col_offset:col_offset + size] = out_img
     full_img[0: size, 256:256 + size] = out_img
 
     return full_img
 
-def batch_with_heatmap(inputs, outputs, mean=torch.Tensor([0.5, 0.5, 0.5]).cuda(), num_rows=2, parts_to_show=None):
+def batch_with_heatmap(inputs, outputs, mode, mean=torch.Tensor([0.5, 0.5, 0.5]).cuda(), num_rows=2, parts_to_show=None):
     batch_img = []
-    for n in range(min(inputs.size(0), 1)):
-        # inp = inputs[n] + mean.view(3, 1, 1).expand_as(inputs[n])
+    for n in range(min(inputs.size(0), 4)):
         inp = inputs[n]
         batch_img.append(
-            sample_with_heatmap(inp.clamp(0, 1), outputs[n], num_rows=num_rows, parts_to_show=parts_to_show)
+            sample_with_heatmap(inp.clamp(0, 1), outputs[n], mode, num_rows=num_rows, parts_to_show=parts_to_show)
         )
     return np.concatenate(batch_img)

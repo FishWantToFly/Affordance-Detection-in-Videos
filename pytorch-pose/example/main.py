@@ -191,7 +191,7 @@ def main(args):
         print('\nEvaluation only')
         JUST_EVALUATE = True
         loss, acc, iou, predictions = validate(val_loader, model, criterion, njoints,
-                                          args.debug, args.flip)
+                                           args.checkpoint, args.debug, args.flip)
         # save_pred(predictions, checkpoint=args.checkpoint)
         print("Average acc : ")
         print(acc)
@@ -214,7 +214,7 @@ def main(args):
 
         # evaluate on validation set
         valid_loss, valid_acc, valid_iou, predictions = validate(val_loader, model, criterion,
-                                                  njoints, args.debug, args.flip)
+                                                  njoints, args.checkpoint, args.debug, args.flip)
 
         # append logger file
         logger.append([epoch + 1, lr, train_loss, valid_loss, train_acc, valid_acc, valid_iou])
@@ -236,6 +236,9 @@ def main(args):
     logger.close()
     # logger.plot(['Train Acc', 'Val Acc'])
     # savefig(os.path.join(args.checkpoint, 'log.eps'))
+
+    print("Best acc = %.3f" % (best_acc))
+    print("Best iou = %.3f" % (best_iou))
 
     # in the end
     list_of_lists = []
@@ -308,21 +311,21 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
             loss = criterion(output, target, target_weight)
         acc = accuracy(output, target, idx)
         
-        if debug: # visualize groundtruth and predictions
-            gt_batch_img = batch_with_heatmap(input, target)
-            pred_batch_img = batch_with_heatmap(input, output)
-            if not gt_win or not pred_win:
-                ax1 = plt.subplot(121)
-                ax1.title.set_text('Groundtruth')
-                gt_win = plt.imshow(gt_batch_img)
-                ax2 = plt.subplot(122)
-                ax2.title.set_text('Prediction')
-                pred_win = plt.imshow(pred_batch_img)
-            else:
-                gt_win.set_data(gt_batch_img)
-                pred_win.set_data(pred_batch_img)
-            plt.pause(.05)
-            plt.draw()
+        # if debug: # visualize groundtruth and predictions
+        #     gt_batch_img = batch_with_heatmap(input, target)
+        #     pred_batch_img = batch_with_heatmap(input, output)
+        #     if not gt_win or not pred_win:
+        #         ax1 = plt.subplot(121)
+        #         ax1.title.set_text('Groundtruth')
+        #         gt_win = plt.imshow(gt_batch_img)
+        #         ax2 = plt.subplot(122)
+        #         ax2.title.set_text('Prediction')
+        #         pred_win = plt.imshow(pred_batch_img)
+        #     else:
+        #         gt_win.set_data(gt_batch_img)
+        #         pred_win.set_data(pred_batch_img)
+        #     plt.pause(.05)
+        #     plt.draw()
 
         # measure accuracy and record loss
         losses.update(loss.item(), input.size(0))
@@ -354,7 +357,7 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
     return losses.avg, acces.avg
 
 
-def validate(val_loader, model, criterion, num_classes, debug=False, flip=True):
+def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False, flip=True):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -408,29 +411,29 @@ def validate(val_loader, model, criterion, num_classes, debug=False, flip=True):
             # for n in range(score_map.size(0)):
             #     predictions[meta['index'][n], :, :] = preds[n, :, :]
 
-            '''
             if debug:
-                # show input
-                gt_batch_img = sample_test(input)
+                gt_batch_img = batch_with_heatmap(input, target, 'gt')
+                pred_batch_img = batch_with_heatmap(input, score_map, 'pred')
                 if not gt_win or not pred_win:
+                    ax1 = plt.subplot(121)
+                    ax1.title.set_text('Groundtruth')
                     gt_win = plt.imshow(gt_batch_img)
+                    ax2 = plt.subplot(122)
+                    ax2.title.set_text('Prediction')
+                    pred_win = plt.imshow(pred_batch_img)
+                    
                 else:
                     gt_win.set_data(gt_batch_img)
-                plt.pause(.5)
-                plt.draw()
-            '''
-
-            if debug:
-                gt_batch_img = batch_with_heatmap(input, target)
-                # pred_batch_img = batch_with_heatmap(input, score_map)
-                if not gt_win or not pred_win:
-                    plt.plot()
-                    gt_win = plt.imshow(gt_batch_img)
-                else:
-                    gt_win.set_data(gt_batch_img)
-                # plt.pause(.05)
-                plt.pause(.5)
-                plt.draw()
+                    pred_win.set_data(pred_batch_img)
+                #### visualize by pop out window 
+                # plt.pause(.5)
+                # plt.draw() 
+                ### save in fig
+                save_fig_dir = os.path.join(checkpoint, 'vis')
+                if not isdir(save_fig_dir):
+                    mkdir_p(save_fig_dir)
+                plt.plot()
+                plt.savefig(os.path.join(save_fig_dir, '%d.png' % (i)))
 
             # measure accuracy and record loss
             losses.update(loss.item(), input.size(0))

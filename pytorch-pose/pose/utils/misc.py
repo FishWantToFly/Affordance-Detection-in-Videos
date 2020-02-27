@@ -36,10 +36,10 @@ def save_checkpoint(state, preds, is_best, is_best_iou, checkpoint='checkpoint',
         shutil.copyfile(filepath, os.path.join(checkpoint, 'checkpoint_{}.pth.tar'.format(state['epoch'])))
 
     if is_best:
-        shutil.copyfile(filepath, os.path.join(checkpoint, 'model_best.pth.tar'))
+        shutil.copyfile(filepath, os.path.join(checkpoint, 'heckpoint_best.pth.tar'))
         # scipy.io.savemat(os.path.join(checkpoint, 'preds_best.mat'), mdict={'preds' : preds})
     if is_best_iou:
-        shutil.copyfile(filepath, os.path.join(checkpoint, 'model_best_iou.pth.tar'))
+        shutil.copyfile(filepath, os.path.join(checkpoint, 'heckpoint_best_iou.pth.tar'))
 
 
 def save_pred(preds, checkpoint='checkpoint', filename='preds_valid.mat'):
