@@ -105,19 +105,28 @@ def intersectionOverUnion(output, target, idxs):
     output = output.view(B, W, H, C).numpy()
     target = target.view(B, W, H, C).numpy()
 
+    # np.save("output.npy", output)
+    # np.save("target.npy", target)
     num_classes = target.shape[-1]
     THRESHOLD = 0.5
     y_pred = (target > THRESHOLD).astype(int)
-    y_true = (output > 0).astype(int)
+    y_true = (output == 1).astype(int) # 2020.3.1 debug
 
     axes = (1,2) # W,H axes of each image
     intersection = np.sum(np.abs(y_pred * y_true), axis=axes) # or, np.logical_and(y_pred, y_true) for one-hot # shape = [Batch]
     mask_sum = np.sum(np.abs(y_true), axis=axes) + np.sum(np.abs(y_pred), axis=axes)
-    union = mask_sum  - intersection # or, np.logical_or(y_pred, y_true) for one-hot
+    union = mask_sum - intersection # or, np.logical_or(y_pred, y_true) for one-hot
+
+    # print(intersection)
+    # print(np.sum(np.abs(y_true), axis=axes))
+    # print(np.sum(np.abs(y_pred), axis=axes))
+    # print(union)
 
     smooth = .001
     iou = (intersection + smooth) / (union + smooth) # [C]
 
+    # print(np.mean(iou))
+    # print()
     return np.mean(iou)
 
 

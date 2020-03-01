@@ -113,6 +113,7 @@ class HourglassNet(nn.Module):
         self.layer2 = self._make_residual(block, self.inplanes, 1)
         self.layer3 = self._make_residual(block, self.num_feats, 1)
         self.maxpool = nn.MaxPool2d(2, stride=2)
+        self.sigmoid = nn.Sigmoid()
 
         ch = self.num_feats*block.expansion
         hg, res, fc, score, fc_, score_ = [], [], [], [], [], []
@@ -179,6 +180,12 @@ class HourglassNet(nn.Module):
             y = self.res[i](y)
             y = self.fc[i](y)
             score = self.score[i](y) # score is like predicted logits ?
+
+            ## 2020.3.1 test for IoU loss
+            score = self.sigmoid(score)
+            
+            ###
+
             out.append(score) # for computing intermediate loss
             if i < self.num_stacks-1:
                 fc_ = self.fc_[i](y)

@@ -26,7 +26,7 @@ def to_torch(ndarray):
     return ndarray
 
 
-def save_checkpoint(state, preds, is_best, is_best_iou, checkpoint='checkpoint', filename='checkpoint.pth.tar', snapshot=None):
+def save_checkpoint(state, preds, is_best_iou, checkpoint='checkpoint', filename='checkpoint.pth.tar', snapshot=None):
     preds = to_numpy(preds)
     filepath = os.path.join(checkpoint, filename)
     torch.save(state, filepath)
@@ -35,9 +35,6 @@ def save_checkpoint(state, preds, is_best, is_best_iou, checkpoint='checkpoint',
     if snapshot and state['epoch'] % snapshot == 0:
         shutil.copyfile(filepath, os.path.join(checkpoint, 'checkpoint_{}.pth.tar'.format(state['epoch'])))
 
-    if is_best:
-        shutil.copyfile(filepath, os.path.join(checkpoint, 'heckpoint_best.pth.tar'))
-        # scipy.io.savemat(os.path.join(checkpoint, 'preds_best.mat'), mdict={'preds' : preds})
     if is_best_iou:
         shutil.copyfile(filepath, os.path.join(checkpoint, 'heckpoint_best_iou.pth.tar'))
 

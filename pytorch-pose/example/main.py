@@ -1,3 +1,16 @@
+'''
+# training 
+python main.py
+# resume training from checkpoint
+python main.py --resume ./checkpoint/checkpoint_20.pth.tar
+# draw line chart
+python main.py --resume ./checkpoint/checkpoint_20.pth.tar -w
+# visualization
+python main.py --resume ./checkpoint/checkpoint_20.pth.tar -e -d 
+
+python main.py --resume ./checkpoint_0226/model_best_iou.pth.tar -e -d 
+'''
+
 from __future__ import print_function, absolute_import
 
 import os
@@ -46,6 +59,44 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 cudnn.benchmark = True  # There is BN issue for early version of PyTorch
                         # see https://github.com/bearpaw/pytorch-pose/issues/33
 
+def draw_line_chart(log_read_dir):
+    list_of_lists = []
+    with open(log_read_dir) as f:
+        for line in f:
+            inner_list = [elt.strip() for elt in line.split('\t')]
+            # in alternative, if you need to use the file content as numbers
+            # inner_list = [int(elt.strip()) for elt in line.split(',')]
+            list_of_lists.append(inner_list)
+    epoch_idx_list, train_acc_list, val_acc_list = [], [], []
+    train_loss_list, val_loss_list = [], []
+    val_iou_list = []
+    list_len = len(list_of_lists)
+    for i in range(1, list_len):
+        epoch_idx_list.append(i)
+        train_loss_list.append(float(list_of_lists[i][2]))
+        val_loss_list.append(float(list_of_lists[i][3]))
+        val_iou_list.append(float(list_of_lists[i][4]))
+
+    plt.xlabel('Epoch')
+    plt.plot(epoch_idx_list, train_loss_list)
+    plt.plot(epoch_idx_list, val_loss_list)
+    plt.legend(['Train loss', 'Val loss'], loc='upper left')
+    plt.savefig(os.path.join(args.checkpoint, 'log_loss.png'))
+    plt.cla()
+
+    # plt.xlabel('Epoch')
+    # plt.plot(epoch_idx_list, train_acc_list)
+    # plt.plot(epoch_idx_list, val_acc_list)
+    # plt.legend(['Train acc', 'Val acc'], loc='upper left')
+    # plt.savefig(os.path.join(args.checkpoint, 'log_acc.png'))
+    # plt.cla()
+
+    plt.xlabel('Epoch')
+    plt.plot(epoch_idx_list, val_iou_list)
+    plt.legend(['Val iou'], loc='upper left')
+    plt.savefig(os.path.join(args.checkpoint, 'log_iou.png'))
+    plt.cla()
+
 def main(args):
     global best_acc
     global best_iou
@@ -57,7 +108,7 @@ def main(args):
     elif args.dataset == 'coco':
         idx = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]
     elif args.dataset == 'sad':
-        idx = [1] # support
+        idx = [1] # support affordance
     else:
         print("Unknown dataset: {}".format(args.dataset))
         assert False
@@ -79,7 +130,8 @@ def main(args):
     model = torch.nn.DataParallel(model).to(device)
 
     # define loss function (criterion) and optimizer
-    criterion = losses.JointsMSELoss().to(device)
+    criterion = losses.IoULoss().to(device)
+    # criterion = losses.JointsMSELoss().to(device)
 
     if args.solver == 'rms':
         optimizer = torch.optim.RMSprop(model.parameters(),
@@ -112,8 +164,7 @@ def main(args):
             print("=> no checkpoint found at '{}'".format(args.resume))
     else:
         logger = Logger(join(args.checkpoint, 'log.txt'), title=title)
-        logger.set_names(['Epoch', 'LR', 'Train Loss', 'Val Loss',
-                          'Train Acc', 'Val Acc', 'Val IoU'])
+        logger.set_names(['Epoch', 'LR', 'Train Loss', 'Val Loss', 'Val IoU'])
 
     print('    Total params: %.2fM'
           % (sum(p.numel() for p in model.parameters())/1000000.0))
@@ -142,46 +193,8 @@ def main(args):
     )
 
     # write line-chart
-    if args.write:
-        list_of_lists = []
-        with open(os.path.join(args.checkpoint, 'log.txt')) as f:
-            for line in f:
-                inner_list = [elt.strip() for elt in line.split('\t')]
-                # in alternative, if you need to use the file content as numbers
-                # inner_list = [int(elt.strip()) for elt in line.split(',')]
-                list_of_lists.append(inner_list)
-        epoch_idx_list, train_acc_list, val_acc_list = [], [], []
-        train_loss_list, val_loss_list = [], []
-        val_iou_list = []
-        list_len = len(list_of_lists)
-        for i in range(1, list_len):
-            epoch_idx_list.append(i)
-            train_loss_list.append(float(list_of_lists[i][2]))
-            val_loss_list.append(float(list_of_lists[i][3]))
-            train_acc_list.append(float(list_of_lists[i][4]))
-            val_acc_list.append(float(list_of_lists[i][5]))
-            val_iou_list.append(float(list_of_lists[i][6]))
-
-        plt.xlabel('Epoch')
-        plt.plot(epoch_idx_list, train_loss_list)
-        plt.plot(epoch_idx_list, val_loss_list)
-        plt.legend(['Train loss', 'Val loss'], loc='upper left')
-        plt.savefig(os.path.join(args.checkpoint, 'log_loss.png'))
-        plt.cla()
-
-        plt.xlabel('Epoch')
-        plt.plot(epoch_idx_list, train_acc_list)
-        plt.plot(epoch_idx_list, val_acc_list)
-        plt.legend(['Train acc', 'Val acc'], loc='upper left')
-        plt.savefig(os.path.join(args.checkpoint, 'log_acc.png'))
-        plt.cla()
-
-        plt.xlabel('Epoch')
-        plt.plot(epoch_idx_list, val_iou_list)
-        plt.legend(['Val iou'], loc='upper left')
-        plt.savefig(os.path.join(args.checkpoint, 'log_iou.png'))
-        plt.cla()
-
+    if args.write: 
+        draw_line_chart(os.path.join(args.checkpoint, 'log.txt'))
         return
 
     # evaluation only
@@ -200,6 +213,10 @@ def main(args):
     # train and eval
     lr = args.lr
     for epoch in range(args.start_epoch, args.epochs):
+        # for test 10 epoch
+        if args.test and epoch == 11:
+            break
+
         lr = adjust_learning_rate(optimizer, epoch, lr, args.schedule, args.gamma)
         print('\nEpoch: %d | LR: %.8f' % (epoch + 1, lr))
 
@@ -209,82 +226,36 @@ def main(args):
             val_loader.dataset.sigma *=  args.sigma_decay
 
         # train for one epoch
-        train_loss, train_acc = train(train_loader, model, criterion, optimizer,
+        train_loss = train(train_loader, model, criterion, optimizer,
                                       args.debug, args.flip)
 
         # evaluate on validation set
-        valid_loss, valid_acc, valid_iou, predictions = validate(val_loader, model, criterion,
+        valid_loss, valid_iou, predictions = validate(val_loader, model, criterion,
                                                   njoints, args.checkpoint, args.debug, args.flip)
 
         # append logger file
-        logger.append([epoch + 1, lr, train_loss, valid_loss, train_acc, valid_acc, valid_iou])
+        logger.append([epoch + 1, lr, train_loss, valid_loss, valid_iou])
 
         # remember best acc and save checkpoint
-        is_best = valid_acc > best_acc
         is_best_iou = valid_iou > best_iou
-        best_acc = max(valid_acc, best_acc)
         best_iou = max(valid_iou, best_iou)
         save_checkpoint({
             'epoch': epoch + 1,
             'arch': args.arch,
             'state_dict': model.state_dict(),
-            'best_acc': best_acc,
             'best_iou': best_iou,
             'optimizer' : optimizer.state_dict(),
-        }, predictions, is_best, is_best_iou, checkpoint=args.checkpoint, snapshot=args.snapshot)
+        }, predictions, is_best_iou, checkpoint=args.checkpoint, snapshot=args.snapshot)
 
     logger.close()
-    # logger.plot(['Train Acc', 'Val Acc'])
-    # savefig(os.path.join(args.checkpoint, 'log.eps'))
 
-    print("Best acc = %.3f" % (best_acc))
     print("Best iou = %.3f" % (best_iou))
-
-    # in the end
-    list_of_lists = []
-    with open(os.path.join(args.checkpoint, 'log.txt')) as f:
-        for line in f:
-            inner_list = [elt.strip() for elt in line.split('\t')]
-            # in alternative, if you need to use the file content as numbers
-            # inner_list = [int(elt.strip()) for elt in line.split(',')]
-            list_of_lists.append(inner_list)
-    epoch_idx_list, train_acc_list, val_acc_list = [], [], []
-    train_loss_list, val_loss_list = [], []
-    list_len = len(list_of_lists)
-    for i in range(1, list_len):
-        epoch_idx_list.append(i)
-        train_loss_list.append(float(list_of_lists[i][2]))
-        val_loss_list.append(float(list_of_lists[i][3]))
-        train_acc_list.append(float(list_of_lists[i][4]))
-        val_acc_list.append(float(list_of_lists[i][5]))
-
-
-    plt.xlabel('Epoch')
-    plt.plot(epoch_idx_list, train_loss_list)
-    plt.plot(epoch_idx_list, val_loss_list)
-    plt.legend(['Train loss', 'Val loss'], loc='upper left')
-    plt.savefig(os.path.join(args.checkpoint, 'log_loss.png'))
-    plt.cla()
-
-    plt.xlabel('Epoch')
-    plt.plot(epoch_idx_list, train_acc_list)
-    plt.plot(epoch_idx_list, val_acc_list)
-    plt.legend(['Train acc', 'Val acc'], loc='upper left')
-    plt.savefig(os.path.join(args.checkpoint, 'log_acc.png'))
-    plt.cla()
-
-    plt.xlabel('Epoch')
-    plt.plot(epoch_idx_list, val_iou_list)
-    plt.legend(['Val iou'], loc='upper left')
-    plt.savefig(os.path.join(args.checkpoint, 'log_iou.png'))
-    plt.cla()
-
+    draw_line_chart(os.path.join(args.checkpoint, 'log.txt'))
 
 def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
-    acces = AverageMeter()
 
     # switch to train mode
     model.train()
@@ -302,7 +273,8 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
 
         # compute output
         output = model(input)
-        if type(output) == list:  # multiple output
+
+        if type(output) == list:  # multiple output # beacuse of intermediate prediction
             loss = 0
             for o in output:
                 loss += criterion(o, target, target_weight)
@@ -311,25 +283,8 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
             loss = criterion(output, target, target_weight)
         acc = accuracy(output, target, idx)
         
-        # if debug: # visualize groundtruth and predictions
-        #     gt_batch_img = batch_with_heatmap(input, target)
-        #     pred_batch_img = batch_with_heatmap(input, output)
-        #     if not gt_win or not pred_win:
-        #         ax1 = plt.subplot(121)
-        #         ax1.title.set_text('Groundtruth')
-        #         gt_win = plt.imshow(gt_batch_img)
-        #         ax2 = plt.subplot(122)
-        #         ax2.title.set_text('Prediction')
-        #         pred_win = plt.imshow(pred_batch_img)
-        #     else:
-        #         gt_win.set_data(gt_batch_img)
-        #         pred_win.set_data(pred_batch_img)
-        #     plt.pause(.05)
-        #     plt.draw()
-
         # measure accuracy and record loss
         losses.update(loss.item(), input.size(0))
-        acces.update(acc[0], input.size(0))
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -341,7 +296,7 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
         end = time.time()
 
         # plot progress
-        bar.suffix  = '({batch}/{size}) Data: {data:.6f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | Acc: {acc: .4f}'.format(
+        bar.suffix  = '({batch}/{size}) Data: {data:.6f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f}'.format(
                     batch=i + 1,
                     size=len(train_loader),
                     data=data_time.val,
@@ -349,19 +304,17 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
                     total=bar.elapsed_td,
                     eta=bar.eta_td,
                     loss=losses.avg,
-                    acc=acces.avg
                     )
         bar.next()
 
     bar.finish()
-    return losses.avg, acces.avg
+    return losses.avg
 
 
 def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False, flip=True):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
-    acces = AverageMeter()
     ioues = AverageMeter()
 
     # predictions
@@ -403,7 +356,9 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             else:  # single output
                 loss = criterion(output, target, target_weight)
 
-            acc = accuracy(score_map, target.cpu(), idx)
+            # if i == 10: break
+
+            # acc = accuracy(score_map, target.cpu(), idx)
             iou = intersectionOverUnion(output.cpu(), target.cpu(), idx) # have not tested
 
             # generate predictions
@@ -437,7 +392,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
 
             # measure accuracy and record loss
             losses.update(loss.item(), input.size(0))
-            acces.update(acc[0], input.size(0))
+            # acces.update(acc[0], input.size(0))
             ioues.update(iou, input.size(0))
 
             # measure elapsed time
@@ -445,17 +400,18 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             end = time.time()
 
             # plot progress
-            bar.suffix  = '({batch}/{size}) Data: {data:.6f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | Acc: {acc: .4f}'.format(
+            
+            bar.suffix  = '({batch}/{size}) Data: {data:.6f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f}'.format(
                         batch=i + 1,
                         size=len(val_loader),
                         data=data_time.val,
                         bt=batch_time.avg,
                         total=bar.elapsed_td,
                         eta=bar.eta_td,
-                        loss=losses.avg,
-                        acc=acces.avg
+                        loss=losses.avg
                         )
             bar.next()
+            
 
         bar.finish()
     
@@ -512,22 +468,22 @@ if __name__ == '__main__':
                         help='optimizers')
     parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                         help='number of data loading workers (default: 4)')
-    parser.add_argument('--epochs', default=100, type=int, metavar='N',
+    parser.add_argument('--epochs', default=80, type=int, metavar='N',
                         help='number of total epochs to run')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                         help='manual epoch number (useful on restarts)')
 
     # 2 GPU setting
-    parser.add_argument('--train-batch', default=30, type=int, metavar='N',
+    parser.add_argument('--train-batch', default=20, type=int, metavar='N', # if andy takes GPU
                         help='train batchsize')
+    # parser.add_argument('--train-batch', default=30, type=int, metavar='N', # IoU loss
+                        # help='train batchsize')
+    # parser.add_argument('--train-batch', default=30, type=int, metavar='N', # normal
+                        # help='train batchsize')
+    # parser.add_argument('--test-batch', default=1, type=int, metavar='N', # for debug
+    #                     help='test batchsize')
     parser.add_argument('--test-batch', default=10, type=int, metavar='N',
                         help='test batchsize')
-
-    # single GPU setting (have not tested)
-    # parser.add_argument('--train-batch', default=8, type=int, metavar='N',
-    #                     help='train batchsize')
-    # parser.add_argument('--test-batch', default=4, type=int, metavar='N',
-    #                     help='test batchsize')
 
     # 2020.2.24 2.5e-4 -> 2.0e-4
     parser.add_argument('--lr', '--learning-rate', default=2e-4, type=float,
@@ -562,7 +518,6 @@ if __name__ == '__main__':
                         help='path to save checkpoint (default: checkpoint)')
     parser.add_argument('--snapshot', default=20, type=int,
                         help='save models for every #snapshot epochs (default: 0)')
-    # ./checkpoint/checkpoint_30.pth.tar
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='path to latest checkpoint (default: none)')
     parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
@@ -571,6 +526,9 @@ if __name__ == '__main__':
                         help='show intermediate results')
     parser.add_argument('-w', '--write', dest='write', action='store_true',
                         help='wirte acc / loss curve')
+    parser.add_argument('-t', '--test', dest='test', action='store_true',
+                        help='Use all data or just 10 actions')
+
 
 
 

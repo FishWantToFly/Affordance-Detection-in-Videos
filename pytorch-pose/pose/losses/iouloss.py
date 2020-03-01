@@ -1,0 +1,50 @@
+# ------------------------------------------------------------------------------
+# Copyright (c) Microsoft
+# Licensed under the MIT License.
+# Written by Bin Xiao (Bin.Xiao@microsoft.com)
+# Modified by Wei Yang (platero.yang@gmail.com)
+# ------------------------------------------------------------------------------
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import torch
+import torch.nn as nn
+
+class IoULoss(nn.Module):
+    def __init__(self, use_target_weight=False):
+        super(IoULoss, self).__init__()
+
+    def iou_loss(self, pred, gt):
+        intersection = torch.sum(pred * gt)
+        union = torch.sum(pred + gt - pred * gt)
+        loss = 1 - (intersection / (union + 1e-8)) # 1 - IoU
+
+        # pred[pred > 0.5] = 1  
+        # pred[pred <= 0.5] = 0
+
+        # pred = pred.int()
+        # gt = gt.int()
+
+        # intersection = torch.sum(pred & gt)
+        # union = torch.sum((pred | gt) - pred & gt)
+
+        # loss = 1 - ((intersection + 1e-8) / (union + 1e-8))
+        # loss = loss.requires_grad_()
+        return loss
+
+    def forward(self, output, target, target_weight = None):
+        # right now target_weight is useless
+        batch_size = output.size(0)
+        num_joints = output.size(1)
+        heatmaps_pred = output.reshape((batch_size, num_joints, -1)).split(1, 1)
+        heatmaps_gt = target.reshape((batch_size, num_joints, -1)).split(1, 1)
+        loss = 0
+
+        for idx in range(num_joints):
+            heatmap_pred = heatmaps_pred[idx].squeeze()
+            heatmap_gt = heatmaps_gt[idx].squeeze()
+            loss += 0.5 * self.iou_loss(heatmap_pred, heatmap_gt)
+
+        return loss / num_joints
