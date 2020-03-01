@@ -36,7 +36,7 @@ def save_checkpoint(state, preds, is_best_iou, checkpoint='checkpoint', filename
         shutil.copyfile(filepath, os.path.join(checkpoint, 'checkpoint_{}.pth.tar'.format(state['epoch'])))
 
     if is_best_iou:
-        shutil.copyfile(filepath, os.path.join(checkpoint, 'heckpoint_best_iou.pth.tar'))
+        shutil.copyfile(filepath, os.path.join(checkpoint, 'checkpoint_best_iou.pth.tar'))
 
 
 def save_pred(preds, checkpoint='checkpoint', filename='preds_valid.mat'):

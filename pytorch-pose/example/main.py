@@ -8,7 +8,9 @@ python main.py --resume ./checkpoint/checkpoint_20.pth.tar -w
 # visualization
 python main.py --resume ./checkpoint/checkpoint_20.pth.tar -e -d 
 
-python main.py --resume ./checkpoint_0226/model_best_iou.pth.tar -e -d 
+python main.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -w
+
+python main.py --resume ./checkpoint_0301_iou/checkpoint_best_iou.pth.tar -e
 '''
 
 from __future__ import print_function, absolute_import
@@ -59,7 +61,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 cudnn.benchmark = True  # There is BN issue for early version of PyTorch
                         # see https://github.com/bearpaw/pytorch-pose/issues/33
 
-def draw_line_chart(log_read_dir):
+def draw_line_chart(args, log_read_dir):
     list_of_lists = []
     with open(log_read_dir) as f:
         for line in f:
@@ -154,7 +156,7 @@ def main(args):
             print("=> loading checkpoint '{}'".format(args.resume))
             checkpoint = torch.load(args.resume)
             args.start_epoch = checkpoint['epoch']
-            best_acc = checkpoint['best_acc']
+            best_iou = checkpoint['best_iou']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             print("=> loaded checkpoint '{}' (epoch {})"
@@ -194,7 +196,7 @@ def main(args):
 
     # write line-chart
     if args.write: 
-        draw_line_chart(os.path.join(args.checkpoint, 'log.txt'))
+        draw_line_chart(args, os.path.join(args.checkpoint, 'log.txt'))
         return
 
     # evaluation only
@@ -203,11 +205,8 @@ def main(args):
     if args.evaluate:
         print('\nEvaluation only')
         JUST_EVALUATE = True
-        loss, acc, iou, predictions = validate(val_loader, model, criterion, njoints,
+        loss, iou, predictions = validate(val_loader, model, criterion, njoints,
                                            args.checkpoint, args.debug, args.flip)
-        # save_pred(predictions, checkpoint=args.checkpoint)
-        print("Average acc : ")
-        print(acc)
         return
 
     # train and eval
@@ -250,7 +249,7 @@ def main(args):
     logger.close()
 
     print("Best iou = %.3f" % (best_iou))
-    draw_line_chart(os.path.join(args.checkpoint, 'log.txt'))
+    draw_line_chart(args, os.path.join(args.checkpoint, 'log.txt'))
 
 def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
     batch_time = AverageMeter()
@@ -417,7 +416,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
     
     print("IoU: ")
     print("%.3f" % (ioues.avg))
-    return losses.avg, acces.avg, ioues.avg, predictions
+    return losses.avg, ioues.avg, predictions
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
@@ -474,10 +473,10 @@ if __name__ == '__main__':
                         help='manual epoch number (useful on restarts)')
 
     # 2 GPU setting
-    parser.add_argument('--train-batch', default=20, type=int, metavar='N', # if andy takes GPU
+    # parser.add_argument('--train-batch', default=20, type=int, metavar='N', # if andy takes GPU
+    #                     help='train batchsize')
+    parser.add_argument('--train-batch', default=30, type=int, metavar='N', # IoU loss
                         help='train batchsize')
-    # parser.add_argument('--train-batch', default=30, type=int, metavar='N', # IoU loss
-                        # help='train batchsize')
     # parser.add_argument('--train-batch', default=30, type=int, metavar='N', # normal
                         # help='train batchsize')
     # parser.add_argument('--test-batch', default=1, type=int, metavar='N', # for debug
