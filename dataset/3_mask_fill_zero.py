@@ -9,7 +9,6 @@ import numpy as np
 from os import walk
 from PIL import Image
 
-
 ######################################################
 # Step 1 : visualize from raw depth information (transform to greyscale image)
 test_action = "/home/s5078345/affordance/dataset/lab/chair_1/move_object_with_thing_in_it/"

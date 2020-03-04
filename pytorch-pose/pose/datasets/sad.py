@@ -33,18 +33,20 @@ class Sad(data.Dataset):
 
         self.dataset_list_dir_path = kwargs['dataset_list_dir_path']
         # contain img and annotation
-        if kwargs['test'] == False:
-            self.train_list = self.load_full_file_list('train')
-            self.valid_list = self.load_full_file_list('test')
+        if kwargs['relabel']: # for relabel
+            self.train_list = self.load_full_file_list('test_list_10') # dummy
+            self.valid_list = self.load_full_file_list('all_original_data_list')
+        elif kwargs['test'] == False:
+            self.train_list = self.load_full_file_list('train_list')
+            self.valid_list = self.load_full_file_list('test_list')
         else :
-            self.train_list = self.load_full_file_list('train_10')
-            self.valid_list = self.load_full_file_list('test_10')
+            self.train_list = self.load_full_file_list('train_list_10')
+            self.valid_list = self.load_full_file_list('test_list_10')
 
-
-    def load_full_file_list(self, mode):
+    def load_full_file_list(self, data_list):
         all_files = []
         action_list = []
-        read_action_list_dir = os.path.join(self.dataset_list_dir_path, mode + '.txt')
+        read_action_list_dir = os.path.join(self.dataset_list_dir_path, data_list + '.txt')
         with open(read_action_list_dir) as f:
             for line in f:
                 inner_list = [elt.strip() for elt in line.split(' ')]
@@ -106,7 +108,7 @@ class Sad(data.Dataset):
 
         # Meta info
         # meta = {'index' : index, 'pts' : pts, 'tpts' : tpts, 'target_weight': target_weight}
-        meta = {'index' : index, 'target_weight': target_weight}
+        meta = {'index': index, 'target_weight': target_weight, 'mask_path': mask_path}
         
         return inp, target, meta
 

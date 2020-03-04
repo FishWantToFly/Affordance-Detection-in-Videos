@@ -22,8 +22,8 @@ def create_dir(new_dir):
 
 
 # ######################################################
-# # Step 1 : horizontally flip 
-# test_action = "/home/s5078345/affordance/dataset/dataset_original/lab/chair_1/put_big_object_on_it"
+# Step 1 : horizontally flip 
+# test_action = "/home/s5078345/Affordance-Detection-on-Video/dataset/dataset_original/lab/chair_1/put_big_object_on_it"
 # depth_dir = 'raw_depth'
 # frame_dir = 'raw_frames'
 # mask_dir = 'mask'
@@ -65,7 +65,7 @@ def create_dir(new_dir):
 # 	create_dir(new_depth_path)
 # 	create_dir(new_frame_path)
 
-# 	# 2. flip mask and frame, then copy
+# 	# 2. flip mask and frame, and then copy
 # 	for mask in mask_list:
 # 		_, _mask = os.path.split(mask)
 # 		mask_img = Image.open(mask)
@@ -91,18 +91,25 @@ def create_dir(new_dir):
 # 		np.save(depth_mirror_path, depth_mirror)
 
 ######################################################
-# Step 1 : horizontally flip 
-test_action = "/home/s5078345/affordance/dataset/dataset_original/lab/chair_1/put_big_object_on_it"
+# Step 2 : adjust brightness or contrast
+# test_action = "/home/s5078345/affordance/dataset/dataset_original/lab/chair_1/put_big_object_on_it"
 depth_dir = 'raw_depth'
 frame_dir = 'raw_frames'
 mask_dir = 'mask'
 depth_dir = 'inpaint_depth'
 now_dir = os.getcwd()
+
+# 1.
+# source_dir_name = 'dataset_original'
+# copy_dir_name = 'dataset_brightness_contrast'
+# 2.
+source_dir_name = 'dataset_horizontally_flip'
 copy_dir_name = 'dataset_flip_brightness_contrast'
+
 if not os.path.exists(copy_dir_name):
 	os.mkdir(copy_dir_name)
 
-for action in glob.glob("./dataset_horizontally_flip/*/*/*"):
+for action in glob.glob("./%s/*/*/*" % (source_dir_name)):
 	# action = test_action
 	_, _action = os.path.split(action)
 	print(action)
@@ -153,11 +160,12 @@ for action in glob.glob("./dataset_horizontally_flip/*/*/*"):
 				frame_img = frame_img.enhance(1.35)
 			else :
 				frame_img = frame_img.enhance(0.8)
-
+		
+		# save adjusted img
 		enhance_frame_path = os.path.join(new_frame_path, _frame)
 		frame_img.save(enhance_frame_path, quality=95)
 
-	# 2. just copy
+	# 2. just copy mask (no change)
 	for mask in mask_list:
 		_, _mask = os.path.split(mask)
 		mask_img = Image.open(mask)
@@ -165,7 +173,7 @@ for action in glob.glob("./dataset_horizontally_flip/*/*/*"):
 		img_mirror_path = os.path.join(new_mask_path, _mask)
 		img_mirror.save(img_mirror_path, quality=95)
 
-	# 3. just copy
+	# 3. just copy depth (no change)
 	for depth in depth_list:
 		_, _depth = os.path.split(depth)
 		depth_npy = np.load(depth)

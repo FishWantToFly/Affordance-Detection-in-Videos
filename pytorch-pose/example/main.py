@@ -1,18 +1,20 @@
 '''
 # training 
 python main.py
+# training using only 10 actions (for test)
+
 # resume training from checkpoint
 python main.py --resume ./checkpoint/checkpoint_20.pth.tar
-# draw line chart
+# draw line chart (loss and IoU curve)
 python main.py --resume ./checkpoint/checkpoint_20.pth.tar -w
-# visualization
+# visualization of pred / gt image
 python main.py --resume ./checkpoint/checkpoint_20.pth.tar -e -d 
 
-python main.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -w
+# relabel train/test
+python main.py --resume ./checkpoint_0301_iou/checkpoint_best_iou.pth.tar -c ./checkpoint_0301_iou -e -r
 
-python main.py --resume ./checkpoint_0301_iou/checkpoint_best_iou.pth.tar -e
+python main.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -d 
 '''
-
 from __future__ import print_function, absolute_import
 
 import os
@@ -32,7 +34,7 @@ from pose.utils.logger import Logger, savefig
 from pose.utils.evaluation import accuracy, AverageMeter, final_preds, intersectionOverUnion
 from pose.utils.misc import save_checkpoint, save_pred, adjust_learning_rate
 from pose.utils.osutils import mkdir_p, isfile, isdir, join
-from pose.utils.imutils import batch_with_heatmap, sample_test
+from pose.utils.imutils import batch_with_heatmap, sample_test, relabel_heatmap
 from pose.utils.transforms import fliplr, flip_back
 import pose.models as models
 import pose.datasets as datasets
@@ -55,6 +57,8 @@ dataset_names = sorted(name for name in datasets.__dict__
 best_acc = 0
 best_iou = 0
 idx = []
+
+RELABEL = False
 
 # select proper device to run
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -104,6 +108,9 @@ def main(args):
     global best_iou
     global idx
 
+    # 2020.3.2
+    global REDRAW
+
     # idx is the index of joints used to compute accuracy
     if args.dataset in ['mpii', 'lsp']:
         idx = [1,2,3,4,5,6,11,12,15,16]
@@ -133,6 +140,7 @@ def main(args):
 
     # define loss function (criterion) and optimizer
     criterion = losses.IoULoss().to(device)
+
     # criterion = losses.JointsMSELoss().to(device)
 
     if args.solver == 'rms':
@@ -171,21 +179,13 @@ def main(args):
     print('    Total params: %.2fM'
           % (sum(p.numel() for p in model.parameters())/1000000.0))
 
-    '''
-    datasets.__dict__[args.dataset] -> depend on args.dataset to replace with datasets
-    '''
     # create data loader
-    train_dataset = datasets.__dict__[args.dataset](is_train=True, **vars(args))
+    train_dataset = datasets.__dict__[args.dataset](is_train=True, **vars(args)) #-> depend on args.dataset to replace with datasets
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=args.train_batch, shuffle=True,
         num_workers=args.workers, pin_memory=True
     )
-
-    # for i, (img, target, meta) in enumerate(train_loader):
-    #     if i == 10 : return
-    #     print("target shape :")
-    #     print(target.shape)
 
     val_dataset = datasets.__dict__[args.dataset](is_train=False, **vars(args))
     val_loader = torch.utils.data.DataLoader(
@@ -194,20 +194,33 @@ def main(args):
         num_workers=args.workers, pin_memory=True
     )
 
-    # write line-chart
+    # write line-chart and stop program
     if args.write: 
         draw_line_chart(args, os.path.join(args.checkpoint, 'log.txt'))
         return
+
+    # redraw training / test label :
+    global RELABEL
+    if args.relabel:
+        RELABEL = True
+        if args.evaluate:
+            print('\nRelabel val label')
+            loss, iou, predictions = validate(val_loader, model, criterion, njoints,
+                                    args.checkpoint, args.debug, args.flip)
+            return 
 
     # evaluation only
     global JUST_EVALUATE
     JUST_EVALUATE = False
     if args.evaluate:
         print('\nEvaluation only')
+        if arg.debug :
+            print('Draw pred /gt heatmap')
         JUST_EVALUATE = True
         loss, iou, predictions = validate(val_loader, model, criterion, njoints,
                                            args.checkpoint, args.debug, args.flip)
         return
+
 
     # train and eval
     lr = args.lr
@@ -338,14 +351,12 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             # compute output
             output = model(input)
             score_map = output[-1].cpu() if type(output) == list else output.cpu()
-            if flip:
-                flip_input = torch.from_numpy(fliplr(input.clone().numpy())).float().to(device)
-                flip_output = model(flip_input)
-                flip_output = flip_output[-1].cpu() if type(flip_output) == list else flip_output.cpu()
-                flip_output = flip_back(flip_output)
-                score_map += flip_output
-
-
+            # if flip:
+            #     flip_input = torch.from_numpy(fliplr(input.clone().numpy())).float().to(device)
+            #     flip_output = model(flip_input)
+            #     flip_output = flip_output[-1].cpu() if type(flip_output) == list else flip_output.cpu()
+            #     flip_output = flip_back(flip_output)
+            #     score_map += flip_output
 
             if type(output) == list:  # multiple output
                 loss = 0
@@ -354,8 +365,6 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                 output = output[-1]
             else:  # single output
                 loss = criterion(output, target, target_weight)
-
-            # if i == 10: break
 
             # acc = accuracy(score_map, target.cpu(), idx)
             iou = intersectionOverUnion(output.cpu(), target.cpu(), idx) # have not tested
@@ -379,15 +388,61 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                 else:
                     gt_win.set_data(gt_batch_img)
                     pred_win.set_data(pred_batch_img)
-                #### visualize by pop out window 
-                # plt.pause(.5)
-                # plt.draw() 
                 ### save in fig
                 save_fig_dir = os.path.join(checkpoint, 'vis')
                 if not isdir(save_fig_dir):
                     mkdir_p(save_fig_dir)
                 plt.plot()
                 plt.savefig(os.path.join(save_fig_dir, '%d.png' % (i)))
+
+            # SELDOM USE
+            if RELABEL:
+                raw_mask_path = meta['mask_path'][0]
+                temp_head = ('/').join(raw_mask_path.split('/')[:-8])
+                temp_tail = ('/').join(raw_mask_path.split('/')[-5:])
+                temp = os.path.join(temp_head, 'dataset_original_relabel', temp_tail)
+                relabel_mask_dir, relabel_mask_name = os.path.split(temp)
+                relabel_mask_dir = os.path.dirname(relabel_mask_dir)
+
+                raw_mask_rgb_path = os.path.join(os.path.dirname(os.path.dirname(raw_mask_path)), 'mask_rgb', relabel_mask_name)
+                new_mask_rgb_path = os.path.join(relabel_mask_dir, 'gt_' + relabel_mask_name)
+                raw_rgb_frame_path = os.path.join(os.path.dirname(os.path.dirname(raw_mask_path)), 'raw_frames', \
+                    relabel_mask_name[:-4] + '.png')
+
+                # print(relabel_mask_dir)
+                # print(relabel_mask_name)
+                from PIL import Image
+                import numpy as np
+                ## ??? replace with raw rgb
+                if os.path.exists(raw_mask_rgb_path):
+                    gt_mask_rgb = np.array(Image.open(raw_mask_rgb_path))
+                else :
+                    gt_mask_rgb = np.array(Image.open(raw_rgb_frame_path))
+
+                pred_batch_img, pred_mask = relabel_heatmap(input, score_map, 'pred') # return an Image object
+                if not isdir(relabel_mask_dir):
+                    mkdir_p(relabel_mask_dir)
+
+                if not gt_win or not pred_win:
+                    ax1 = plt.subplot(121)
+                    ax1.title.set_text('MASK_RGB_GT')
+                    gt_win = plt.imshow(gt_mask_rgb)
+                    ax2 = plt.subplot(122)
+                    ax2.title.set_text('Mask_RGB_PRED')
+                    pred_win = plt.imshow(pred_batch_img)
+                    
+                else:
+                    gt_win.set_data(gt_mask_rgb)
+                    pred_win.set_data(pred_batch_img)
+                plt.plot()
+                plt.savefig(os.path.join(relabel_mask_dir, 'vis_' + relabel_mask_name))
+
+
+                # pred_batch_img.save(os.path.join(relabel_mask_dir, 'vis_' + relabel_mask_name))
+                pred_mask.save(os.path.join(relabel_mask_dir, relabel_mask_name))
+
+                # also paste original rgb_mask frame
+                # os.system('cp %s %s' % (raw_mask_rgb_path, new_mask_rgb_path))                
 
             # measure accuracy and record loss
             losses.update(loss.item(), input.size(0))
@@ -399,7 +454,6 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             end = time.time()
 
             # plot progress
-            
             bar.suffix  = '({batch}/{size}) Data: {data:.6f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f}'.format(
                         batch=i + 1,
                         size=len(val_loader),
@@ -475,16 +529,16 @@ if __name__ == '__main__':
     # 2 GPU setting
     # parser.add_argument('--train-batch', default=20, type=int, metavar='N', # if andy takes GPU
     #                     help='train batchsize')
-    parser.add_argument('--train-batch', default=30, type=int, metavar='N', # IoU loss
+    parser.add_argument('--train-batch', default=30, type=int, metavar='N',
                         help='train batchsize')
-    # parser.add_argument('--train-batch', default=30, type=int, metavar='N', # normal
-                        # help='train batchsize')
-    # parser.add_argument('--test-batch', default=1, type=int, metavar='N', # for debug
-    #                     help='test batchsize')
     parser.add_argument('--test-batch', default=10, type=int, metavar='N',
                         help='test batchsize')
 
-    # 2020.2.24 2.5e-4 -> 2.0e-4
+    # parser.add_argument('--train-batch', default=1, type=int, metavar='N',
+    #                     help='train batchsize')
+    # parser.add_argument('--test-batch', default=1, type=int, metavar='N', # for debug
+    #                     help='test batchsize')
+
     parser.add_argument('--lr', '--learning-rate', default=2e-4, type=float,
                         metavar='LR', help='initial learning rate')
     parser.add_argument('--momentum', default=0, type=float, metavar='M',
@@ -528,7 +582,8 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--test', dest='test', action='store_true',
                         help='Use all data or just 10 actions')
 
-
-
+    # 2020.3.2 for relabel (only use once)
+    parser.add_argument('-r', '--relabel', dest='relabel', action='store_true',
+                        help='Use model prediction to relabel label')
 
     main(parser.parse_args())

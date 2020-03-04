@@ -221,3 +221,67 @@ def batch_with_heatmap(inputs, outputs, mode, mean=torch.Tensor([0.5, 0.5, 0.5])
             sample_with_heatmap(inp.clamp(0, 1), outputs[n], mode, num_rows=num_rows, parts_to_show=parts_to_show)
         )
     return np.concatenate(batch_img)
+
+
+'''
+Below is only for relabel
+'''
+
+def color_heatmap_relabel(x, mode):
+    x = to_numpy(x) # 256x256
+    color = np.zeros((x.shape[0],x.shape[1]))
+    if mode == 'gt' :
+        gt_pos = (x != 0).nonzero()
+    elif mode == 'pred' :
+        x = x * 255 # because x is normalized before
+        gt_pos = (x >= 0.5).nonzero() # have to exceed threshold
+    pos_0, pos_1 = gt_pos
+    color[pos_0, pos_1] = 1
+    color = (color * 255).astype(np.uint8)
+    return color
+
+
+def relabel_with_heatmap(inp, out, mode, num_rows=2, parts_to_show=None):
+    inp = to_numpy(inp * 255)
+    out = to_numpy(out)
+
+    img = np.zeros((inp.shape[1], inp.shape[2], inp.shape[0]))
+    for i in range(3):
+        img[:, :, i] = inp[i, :, :]
+
+    img = np.asarray(img, np.uint8)
+    # print(img.shape) # 256 256 3
+
+    size = img.shape[0] # 256
+
+    full_img = np.zeros((640, 480, 3), np.uint8) # 256 512 3
+
+    inp_small = np.array(Image.fromarray(img).resize((size, size)))
+
+    part_idx = 0
+    out_resized = np.array(Image.fromarray(out[part_idx]).resize((size, size)))
+    out_resized = out_resized.astype(float)/255
+    
+    # print(out_resized.shape) # 256 256
+
+    color_hm_relabel = color_heatmap_relabel(out_resized, mode)
+    output_mask = color_hm_relabel.copy()
+
+    color_hm = color_heatmap(out_resized, mode)
+    out_img = inp_small.copy() * .99
+    out_img += color_hm * .7
+    out_img = np.asarray(out_img, dtype = np.uint8)
+
+    full_img = Image.fromarray(out_img).resize((640, 480))
+    output_mask = Image.fromarray(output_mask).resize((640, 480))
+
+    full_img = np.array(full_img)
+    full_img = np.asarray(full_img, np.uint8)
+    # output_mask = np.array(output_mask)
+    # output_mask = np.asarray(output_mask, np.uint8)
+
+    return full_img, output_mask
+
+def relabel_heatmap(inputs, outputs, mode, mean=torch.Tensor([0.5, 0.5, 0.5]).cuda(), num_rows=2, parts_to_show=None):
+    inp = inputs[0]
+    return relabel_with_heatmap(inp.clamp(0, 1), outputs[0], mode, num_rows=num_rows, parts_to_show=parts_to_show)
