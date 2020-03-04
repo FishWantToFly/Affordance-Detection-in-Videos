@@ -10,10 +10,11 @@ python main.py --resume ./checkpoint/checkpoint_20.pth.tar -w
 # visualization of pred / gt image
 python main.py --resume ./checkpoint/checkpoint_20.pth.tar -e -d 
 
-# relabel train/test
+# relabel train/test (visualize in same architecture)
 python main.py --resume ./checkpoint_0301_iou/checkpoint_best_iou.pth.tar -c ./checkpoint_0301_iou -e -r
 
-python main.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -d 
+# temp
+python main.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
 '''
 from __future__ import print_function, absolute_import
 
@@ -110,6 +111,14 @@ def main(args):
 
     # 2020.3.2
     global REDRAW
+
+    # 2020.3.4
+    # if you do type arg.resume
+    # args.checkpoint would be derived from arg.resume
+    if args.resume != '':
+        args.checkpoint = ('/').join(args.resume.split('/')[:2])
+    if args.relabel == True:
+        args.test_batch = 1
 
     # idx is the index of joints used to compute accuracy
     if args.dataset in ['mpii', 'lsp']:
@@ -219,6 +228,7 @@ def main(args):
         JUST_EVALUATE = True
         loss, iou, predictions = validate(val_loader, model, criterion, njoints,
                                            args.checkpoint, args.debug, args.flip)
+        print("Val IoU: %.3f" % (iou))
         return
 
 
@@ -244,6 +254,7 @@ def main(args):
         # evaluate on validation set
         valid_loss, valid_iou, predictions = validate(val_loader, model, criterion,
                                                   njoints, args.checkpoint, args.debug, args.flip)
+        print("Val IoU: %.3f" % (valid_iou))
 
         # append logger file
         logger.append([epoch + 1, lr, train_loss, valid_loss, valid_iou])
@@ -397,10 +408,11 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
 
             # SELDOM USE
             if RELABEL:
+                # save in same checkpoint
                 raw_mask_path = meta['mask_path'][0]
                 temp_head = ('/').join(raw_mask_path.split('/')[:-8])
                 temp_tail = ('/').join(raw_mask_path.split('/')[-5:])
-                temp = os.path.join(temp_head, 'dataset_original_relabel', temp_tail)
+                temp = os.path.join(temp_head, 'pytorch-pose/example', checkpoint, 'pred_vis', temp_tail)
                 relabel_mask_dir, relabel_mask_name = os.path.split(temp)
                 relabel_mask_dir = os.path.dirname(relabel_mask_dir)
 
@@ -413,7 +425,6 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                 # print(relabel_mask_name)
                 from PIL import Image
                 import numpy as np
-                ## ??? replace with raw rgb
                 if os.path.exists(raw_mask_rgb_path):
                     gt_mask_rgb = np.array(Image.open(raw_mask_rgb_path))
                 else :
@@ -437,12 +448,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                 plt.plot()
                 plt.savefig(os.path.join(relabel_mask_dir, 'vis_' + relabel_mask_name))
 
-
-                # pred_batch_img.save(os.path.join(relabel_mask_dir, 'vis_' + relabel_mask_name))
-                pred_mask.save(os.path.join(relabel_mask_dir, relabel_mask_name))
-
-                # also paste original rgb_mask frame
-                # os.system('cp %s %s' % (raw_mask_rgb_path, new_mask_rgb_path))                
+                pred_mask.save(os.path.join(relabel_mask_dir, relabel_mask_name)) 
 
             # measure accuracy and record loss
             losses.update(loss.item(), input.size(0))
@@ -464,12 +470,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                         loss=losses.avg
                         )
             bar.next()
-            
-
         bar.finish()
-    
-    print("IoU: ")
-    print("%.3f" % (ioues.avg))
     return losses.avg, ioues.avg, predictions
 
 if __name__ == '__main__':
@@ -487,8 +488,6 @@ if __name__ == '__main__':
                         help='path to annotation (json)')
     parser.add_argument('--year', default=2014, type=int, metavar='N',
                         help='year of coco dataset: 2014 (default) | 2017)')
-
-    # original was 256 and 64 -> 480 adn 120 ???
 
     parser.add_argument('--inp-res', default=256, type=int,
                         help='input resolution (default: 256)')
