@@ -18,14 +18,10 @@ depth_dir = 'raw_depth'
 frame_dir = 'raw_frames'
 mask_dir = 'mask'
 
-black_image_path = "/home/s5078345/Affordance-Detection-on-Video/dataset/all_black_image.jpg"
-black_image = Image.open(black_image_path)
-black_image = black_image.convert("RGB")
-
 action_total = 0
 action_unique_list = []
 action_frames_list = []
-for action in glob.glob("../dataset/*/*/*/*"):	
+for action in glob.glob("../dataset/dataset_original/*/*/*"):	
 	# count total training action
 	action_total += 1
 
@@ -45,7 +41,6 @@ print("Total action number = %d" % (action_total))
 print("Total unique action number = %d" % (len(action_unique_list)))
 print("Action list : ")
 print(action_unique_list)
-
 
 print("=== RGB Frame ===")
 print("Total frame number = %d" % (sum(action_frames_list)))
