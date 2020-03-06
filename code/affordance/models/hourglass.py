@@ -104,7 +104,8 @@ class HourglassNet(nn.Module):
         self.inplanes = 64 # feature dim after "input -> conv" at start ?
         self.num_feats = 128
         self.num_stacks = num_stacks
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
+        # input channel number. 3 (RGB) + 1 (depth)
+        self.conv1 = nn.Conv2d(4, self.inplanes, kernel_size=7, stride=2, padding=3,
                                bias=True)
         self.bn1 = nn.BatchNorm2d(self.inplanes)
         self.relu = nn.ReLU(inplace=True)

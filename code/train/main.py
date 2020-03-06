@@ -30,16 +30,16 @@ import torch.optim
 import torchvision.datasets as datasets
 
 import _init_paths
-from pose import Bar
-from pose.utils.logger import Logger, savefig
-from pose.utils.evaluation import accuracy, AverageMeter, final_preds, intersectionOverUnion
-from pose.utils.misc import save_checkpoint, save_pred, adjust_learning_rate
-from pose.utils.osutils import mkdir_p, isfile, isdir, join
-from pose.utils.imutils import batch_with_heatmap, sample_test, relabel_heatmap
-from pose.utils.transforms import fliplr, flip_back
-import pose.models as models
-import pose.datasets as datasets
-import pose.losses as losses
+from affordance import Bar
+from affordance.utils.logger import Logger, savefig
+from affordance.utils.evaluation import accuracy, AverageMeter, final_preds, intersectionOverUnion
+from affordance.utils.misc import save_checkpoint, save_pred, adjust_learning_rate
+from affordance.utils.osutils import mkdir_p, isfile, isdir, join
+from affordance.utils.imutils import batch_with_heatmap, sample_test, relabel_heatmap
+from affordance.utils.transforms import fliplr, flip_back
+import affordance.models as models
+import affordance.datasets as datasets
+import affordance.losses as losses
 
 os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1'
 
@@ -119,6 +119,9 @@ def main(args):
         args.checkpoint = ('/').join(args.resume.split('/')[:2])
     if args.relabel == True:
         args.test_batch = 1
+    if args.test == True:
+        args.train_batch = 10
+        args.test_batch = 10
 
     # idx is the index of joints used to compute accuracy
     if args.dataset in ['mpii', 'lsp']:
@@ -196,6 +199,14 @@ def main(args):
         num_workers=args.workers, pin_memory=True
     )
 
+    '''    
+    for i, (input, input_depth, target, meta) in enumerate(train_loader):
+        print(input_depth)
+        print(input.shape)
+        print(input_depth.shape)
+        return
+    '''
+
     val_dataset = datasets.__dict__[args.dataset](is_train=False, **vars(args))
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
@@ -235,6 +246,10 @@ def main(args):
     # train and eval
     lr = args.lr
     for epoch in range(args.start_epoch, args.epochs):
+        ## backup when training starts
+        os.system('cp ../affordance/models/hourglass.py %s/hourglass.py' % args.checkpoint)
+        os.system('cp ./main.py %s/main.py' % args.checkpoint)
+        
         # for test 10 epoch
         if args.test and epoch == 11:
             break
@@ -287,15 +302,16 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
 
     gt_win, pred_win = None, None
     bar = Bar('Train', max=len(train_loader))
-    for i, (input, target, meta) in enumerate(train_loader):
+    for i, (input, input_depth, target, meta) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
 
-        input, target = input.to(device), target.to(device, non_blocking=True)
+        input, input_depth, target = input.to(device), input_depth.to(device), target.to(device, non_blocking=True)
         target_weight = meta['target_weight'].to(device, non_blocking=True)
 
         # compute output
-        output = model(input)
+        # output = model(input)
+        output = model(torch.cat((input, input_depth), 1))
 
         if type(output) == list:  # multiple output # beacuse of intermediate prediction
             loss = 0
@@ -351,16 +367,18 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
     end = time.time()
     bar = Bar('Eval ', max=len(val_loader))
     with torch.no_grad():
-        for i, (input, target, meta) in enumerate(val_loader):
+        for i, (input, input_depth, target, meta) in enumerate(val_loader):
             # measure data loading time
             data_time.update(time.time() - end)
 
             input = input.to(device, non_blocking=True)
+            input_depth = input_depth.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
             target_weight = meta['target_weight'].to(device, non_blocking=True)
 
             # compute output
-            output = model(input)
+            # output = model(input)
+            output = model(torch.cat((input, input_depth), 1))
             score_map = output[-1].cpu() if type(output) == list else output.cpu()
             # if flip:
             #     flip_input = torch.from_numpy(fliplr(input.clone().numpy())).float().to(device)
@@ -520,7 +538,7 @@ if __name__ == '__main__':
                         help='optimizers')
     parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                         help='number of data loading workers (default: 4)')
-    parser.add_argument('--epochs', default=80, type=int, metavar='N',
+    parser.add_argument('--epochs', default=100, type=int, metavar='N',
                         help='number of total epochs to run')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                         help='manual epoch number (useful on restarts)')
@@ -556,15 +574,9 @@ if __name__ == '__main__':
                         help='flip the input during validation')
     parser.add_argument('--sigma', type=float, default=1,
                         help='Groundtruth Gaussian sigma.')
-    # parser.add_argument('--scale-factor', type=float, default=0.25,
-    #                     help='Scale factor (data aug).')
-    # parser.add_argument('--rot-factor', type=float, default=30,
-    #                     help='Rotation factor (data aug).')
     parser.add_argument('--sigma-decay', type=float, default=0,
                         help='Sigma decay rate for each epoch.')
-    # parser.add_argument('--label-type', metavar='LABELTYPE', default='Gaussian',
-    #                     choices=['Gaussian', 'Cauchy'],
-    #                     help='Labelmap dist type: (default=Gaussian)')
+
     # Miscs
     parser.add_argument('-c', '--checkpoint', default='checkpoint', type=str, metavar='PATH',
                         help='path to save checkpoint (default: checkpoint)')

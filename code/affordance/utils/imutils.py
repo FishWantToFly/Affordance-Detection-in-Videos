@@ -22,7 +22,7 @@ def im_to_torch(img):
 
 def im_to_torch_no_normalize(img):
     img = np.transpose(img, (2, 0, 1)) # C*H*W
-    img = to_torch(img).float()
+    # img = to_torch(img).float()
     return img
 
 def load_image(img_path):
@@ -39,7 +39,6 @@ def load_mask(mask_path):
     # deal with two kind of mask here
     # 1. C = 1: place not 0 should be value 1 (valid mask)
     # 2. C = 3: all black mask
-
     _mask = np.zeros((mask.shape[0], mask.shape[1], 1))
     if mask.shape[2] == 1 :
         non_zero = mask.nonzero() ## can not transformed into array !!!!
@@ -47,7 +46,16 @@ def load_mask(mask_path):
     elif mask.shape[2] == 3 :
         pass
     
-    return im_to_torch(_mask)
+    return im_to_torch(_mask) # need to normalize
+
+def load_depth(depth_path):
+    max_depth = 10000 # actual number is 9xxxx
+    depth = np.load(depth_path)
+    # project into image space for further resize 
+    depth = depth / 10000 * 255
+    depth = np.asarray(depth, dtype = np.uint8)
+    depth = np.transpose(depth, (2, 0, 1)) # C*H*W
+    return depth
 
 def resize(img, owidth, oheight):  # CxHxW -> HxWxC
     img = to_numpy(img)
