@@ -26,8 +26,7 @@ def to_torch(ndarray):
     return ndarray
 
 
-def save_checkpoint(state, preds, is_best_iou, checkpoint='checkpoint', filename='checkpoint.pth.tar', snapshot=None):
-    preds = to_numpy(preds)
+def save_checkpoint(state, is_best_iou, checkpoint='checkpoint', filename='checkpoint.pth.tar', snapshot=None):
     filepath = os.path.join(checkpoint, filename)
     torch.save(state, filepath)
     # scipy.io.savemat(os.path.join(checkpoint, 'preds.mat'), mdict={'preds' : preds})

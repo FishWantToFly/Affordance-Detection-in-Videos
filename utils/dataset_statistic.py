@@ -11,6 +11,8 @@ from os import walk
 from PIL import Image
 import statistics 
 
+print("For original dataset. (No count for augmented dataset.)\n")
+
 ######################################################
 # Step 1 : visualize from raw depth information (transform to greyscale image)
 test_action = "/home/s5078345/affordance/dataset/lab/chair_1/move_object_with_thing_in_it/"

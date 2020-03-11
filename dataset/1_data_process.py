@@ -1,9 +1,13 @@
 import glob, os
 from os import walk
 
+
+# dataset_name = 'dataset_original'
+dataset_name = 'dataset_lab_ito'
+
 # # Step 1 : delete named dummy file
-# f = []
-# for filename in glob.glob("./*/*/*/*/dummy"):
+# f = []	
+# for filename in glob.glob("./%s/*/*/*/dummy" % (dataset_name)):
 # 	print(filename)
 # 	os.remove(filename)
 
@@ -14,7 +18,7 @@ from os import walk
 # frame_dir = 'raw_frames'
 
 # # delete redundant depth
-# for action in glob.glob("./*/*/*"):
+# for action in glob.glob("./%s/*/*/*" % (dataset_name)):
 # 	print(action)
 # 	action_depth_path = os.path.join(action, depth_dir, '*')
 # 	action_frame_path = os.path.join(action, frame_dir, '*')
@@ -34,14 +38,12 @@ from os import walk
 # 			os.remove(depth_txt) 
 
 #######################################################
-# # Step 3 :  reorder (start from 00000)
-# test_action_dir = "/home/s5078345/affordance/dataset/kitchen/chair_1/remove_big_object_on_it_1/"
+# # Step 3 : reorder (start from 00000)
+# # test_action_dir = "/home/s5078345/affordance/dataset/kitchen/chair_1/remove_big_object_on_it_1/"
 # depth_dir = 'raw_depth'
 # frame_dir = 'raw_frames'
 
-# # delete redundant depth
-# for action in glob.glob("./*/*/*"):
-# 	print(action)
+# for action in glob.glob("./%s/*/*/*" % (dataset_name)):
 # 	action_depth_path = os.path.join(action, depth_dir, '*')
 # 	action_frame_path = os.path.join(action, frame_dir, '*')
 # 	depth_list = sorted(glob.glob(action_depth_path))
@@ -59,14 +61,15 @@ from os import walk
 # 		os.rename(frame_path, new_frame_name)
 # 		os.rename(depth_txt, new_depth_name)
 
+
 ######################################################
 # Step 4 : save depth txt -> numpy
-test_action_dir = "/home/s5078345/affordance/dataset/kitchen/chair_1/remove_big_object_on_it_1/"
+# test_action_dir = "/home/s5078345/affordance/dataset/kitchen/chair_1/remove_big_object_on_it_1/"
 depth_dir = 'raw_depth'
 frame_dir = 'raw_frames'
 
 # delete redundant depth
-for action in glob.glob("./*/*/*"):
+for action in glob.glob("./%s/*/*/*" % (dataset_name)):
 	print(action)
 	action_depth_path = os.path.join(action, depth_dir, '*')
 	action_frame_path = os.path.join(action, frame_dir, '*')

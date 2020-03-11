@@ -51,6 +51,7 @@ with open(test_save_dir, 'w') as f:
 		f.write("%s\n" % action)
 
 
+'''
 # for test purpose : 10
 train_save_dir = os.path.join(data_list_dir, 'train_list_10.txt')
 test_save_dir = os.path.join(data_list_dir, 'test_list_10.txt')
@@ -70,19 +71,21 @@ with open(test_save_dir, 'w') as f:
 			count_test += 1
 		else :
 			break
+'''
 
 
 ### list original all data
+# dataset_name = 'dataset_original'
+# dataset_name = 'dataset_lab_ito'
+# data_list = []
+# for action in glob.glob("./%s/*/*/*" % (dataset_name)):
+# 	# action = test_action
+# 	_, _action = os.path.split(action)
+# 	# print(action)
+# 	data_list.append(action)
 
-data_list = []
-for action in glob.glob("./dataset_original/*/*/*"):
-	# action = test_action
-	_, _action = os.path.split(action)
-	# print(action)
-	data_list.append(action)
-
-all_save_dir = os.path.join(data_list_dir, 'all_original_data_list.txt')
-with open(all_save_dir, 'w') as f:
-	for action in data_list:
-		f.write("%s\n" % action)
+# all_save_dir = os.path.join(data_list_dir, 'data_lab_ito.txt')
+# with open(all_save_dir, 'w') as f:
+# 	for action in data_list:
+# 		f.write("%s\n" % action)
 

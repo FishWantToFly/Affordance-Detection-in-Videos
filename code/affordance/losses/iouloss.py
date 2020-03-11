@@ -1,10 +1,3 @@
-# ------------------------------------------------------------------------------
-# Copyright (c) Microsoft
-# Licensed under the MIT License.
-# Written by Bin Xiao (Bin.Xiao@microsoft.com)
-# Modified by Wei Yang (platero.yang@gmail.com)
-# ------------------------------------------------------------------------------
-
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -20,18 +13,6 @@ class IoULoss(nn.Module):
         intersection = torch.sum(pred * gt)
         union = torch.sum(pred + gt - pred * gt)
         loss = 1 - (intersection / (union + 1e-8)) # 1 - IoU
-
-        # pred[pred > 0.5] = 1  
-        # pred[pred <= 0.5] = 0
-
-        # pred = pred.int()
-        # gt = gt.int()
-
-        # intersection = torch.sum(pred & gt)
-        # union = torch.sum((pred | gt) - pred & gt)
-
-        # loss = 1 - ((intersection + 1e-8) / (union + 1e-8))
-        # loss = loss.requires_grad_()
         return loss
 
     def forward(self, output, target, target_weight = None):

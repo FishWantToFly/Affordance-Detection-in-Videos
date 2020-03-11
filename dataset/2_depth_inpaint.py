@@ -1,4 +1,7 @@
 '''
+have to open a nwe terminal and ...
+source activate siammask
+
 inpaint depth
 	2.1 transform to greyscale image (.txt -> .npy -> .png)
 	2.2 use cv2.inpaint to inpaint greyscale image
@@ -6,21 +9,21 @@ inpaint depth
 	2.4 transform back to actual depth info. (.npy)
 '''
 
-
+## step 0 : have to use siammask environment to use cv2
 import cv2, glob, os, copy
 import numpy as np
 from os import walk
 from PIL import Image
 
+dataset_name = 'dataset_lab_ito'
+
 ######################################################
 # Step 1 : visualize from raw depth information (transform to greyscale image)
-test_action = "/home/s5078345/affordance/dataset/kitchen/chair_1/remove_big_object_on_it_1/"
+# test_action = "/home/s5078345/affordance/dataset/kitchen/chair_1/remove_big_object_on_it_1/"
 depth_dir = 'raw_depth'
 frame_dir = 'raw_frames'
 
-# delete redundant depth
-for action in glob.glob("./*/*/*"):
-	
+for action in glob.glob("./%s/*/*/*" % (dataset_name)):
 	print(action)
 	action_depth_path = os.path.join(action, depth_dir, '*')
 	action_frame_path = os.path.join(action, frame_dir, '*')
@@ -34,8 +37,6 @@ for action in glob.glob("./*/*/*"):
 		with open(depth_txt) as f:
 			for line in f:
 				inner_list = [elt.strip() for elt in line.split(',')]
-				# in alternative, if you need to use the file content as numbers
-				# inner_list = [int(elt.strip()) for elt in line.split(',')]
 				depth_list.append(inner_list)
 		depth_array = np.array(depth_list, dtype = np.int)
 		depth_max_value = np.amax(depth_array)
@@ -43,8 +44,8 @@ for action in glob.glob("./*/*/*"):
 		
 		# create inpaint mask
 		mask = copy.deepcopy(depth_array)
-		for i in range (mask.shape[0]): #traverses through height of the image
-			for j in range (mask.shape[1]): #traverses through width of the image
+		for i in range (mask.shape[0]): # traverses through height of the image
+			for j in range (mask.shape[1]): # traverses through width of the image
 				if mask[i][j] != 0:
 					mask[i][j] = 0
 				else :

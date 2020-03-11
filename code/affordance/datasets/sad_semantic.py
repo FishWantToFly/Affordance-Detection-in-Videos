@@ -19,7 +19,7 @@ from affordance.utils.imutils import *
 from affordance.utils.transforms import *
 
 
-class Sad(data.Dataset):
+class Sad_semantic(data.Dataset):
     def __init__(self, is_train = True, **kwargs):
         self.img_folder = kwargs['image_path'] # root image folders
         # self.jsonf:ile   = kwargs['anno_path']
@@ -34,24 +34,15 @@ class Sad(data.Dataset):
         self.semantic_len = len(self.semantic_dict)
 
         # contain img and annotation
-
-        # if kwargs['relabel']: # for relabel / visualization
-        #     self.train_list = self.load_full_file_list('test_list_10') # dummy
-        #     self.valid_list = self.load_full_file_list('all_original_data_list') # test on original data is enough
-        # elif kwargs['test'] == False:
-        #     self.train_list = self.load_full_file_list('train_list')
-        #     self.valid_list = self.load_full_file_list('test_list')
-        # else :
-        #     self.train_list = self.load_full_file_list('train_list_10')
-        #     self.valid_list = self.load_full_file_list('test_list_10')
-
-        # # for multi-object
-        # self.train_list = self.load_full_file_list('train_list_10')
-        # self.valid_list = self.load_full_file_list('data_lab_ito')
-
-        # 2020.3.10 for testing mutually exclusive
-        self.train_list = self.load_full_file_list('train_list_v2')
-        self.valid_list = self.load_full_file_list('test_list_v2')
+        if kwargs['relabel']: # for relabel / visualization
+            self.train_list = self.load_full_file_list('test_list_10') # dummy
+            self.valid_list = self.load_full_file_list('all_original_data_list') # test on original data is enough
+        elif kwargs['test'] == False:
+            self.train_list = self.load_full_file_list('train_list')
+            self.valid_list = self.load_full_file_list('test_list')
+        else :
+            self.train_list = self.load_full_file_list('train_list_10')
+            self.valid_list = self.load_full_file_list('test_list_10')
 
 
 
@@ -77,7 +68,7 @@ class Sad(data.Dataset):
                 frame_dir_dir = os.path.dirname(os.path.dirname(frame))
                 mask = os.path.join(frame_dir_dir, mask_dir_name, frame_name[:-4] + '.jpg')
                 depth = os.path.join(frame_dir_dir, depth_dir_name, frame_name[:-4] + '.npy')
-                all_files.append([frame, mask, depth])
+                all_files.append([frame, mask, depth, semantic_label])
                 # print(frame)
                 # print(mask)
                 # print()
@@ -86,9 +77,9 @@ class Sad(data.Dataset):
     
     def __getitem__(self, index):
         if self.is_train:
-            img_path, mask_path, depth_path = self.train_list[index]
+            img_path, mask_path, depth_path, target_semantic = self.train_list[index]
         else    :
-            img_path, mask_path, depth_path = self.valid_list[index]
+            img_path, mask_path, depth_path, target_semantic = self.valid_list[index]
 
         # load image and mask
         img = load_image(img_path)  # CxHxW
@@ -130,7 +121,7 @@ class Sad(data.Dataset):
         # meta = {'index' : index, 'pts' : pts, 'tpts' : tpts, 'target_weight': target_weight}
         meta = {'index': index, 'target_weight': target_weight, 'mask_path': mask_path}
         
-        return inp, input_depth, target, meta
+        return inp, input_depth, target, target_semantic, meta
 
     def __len__(self):
         if self.is_train:
@@ -138,7 +129,7 @@ class Sad(data.Dataset):
         else:
             return len(self.valid_list)
 
-def sad(**kwargs):
-    return Sad(**kwargs)
+def sad_semantic(**kwargs):
+    return Sad_semantic(**kwargs)
 
-sad.njoints = 1  # ugly but works
+sad_semantic.njoints = 1  # ugly but works

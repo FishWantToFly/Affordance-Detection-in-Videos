@@ -9,7 +9,7 @@ import torch.nn.functional as F
 # from .preresnet import BasicBlock, Bottleneck
 
 
-__all__ = ['HourglassNet', 'hg']
+__all__ = ['HourglassNet_semantic', 'hg_semantic']
 
 class Bottleneck(nn.Module):
     '''
@@ -96,10 +96,10 @@ class Hourglass(nn.Module):
         return self._hour_glass_forward(self.depth, x)
 
 
-class HourglassNet(nn.Module):
+class HourglassNet_semantic(nn.Module):
     '''Hourglass model from Newell et al ECCV 2016'''
     def __init__(self, block, num_stacks=2, num_blocks=4, num_classes=16):
-        super(HourglassNet, self).__init__()
+        super(HourglassNet_semantic, self).__init__()
 
         self.inplanes = 64 # feature dim after "input -> conv" at start ?
         self.num_feats = 128
@@ -117,8 +117,8 @@ class HourglassNet(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
         ### semantic
-        # self.test_layer_1 = nn.Conv2d(256, 64, kernel_size=1, bias=True)
-        # self.fc_test = nn.Linear(64 * 32 * 32, 5)
+        self.test_layer_1 = nn.Conv2d(256, 64, kernel_size=1, bias=True)
+        self.fc_test = nn.Linear(64 * 32 * 32, 5)
 
 
         ch = self.num_feats*block.expansion
@@ -188,11 +188,11 @@ class HourglassNet(nn.Module):
             y = self.fc[i](y) # 256 x 64 x 64
 
             ## semantic
-            # test = self.maxpool(y)
-            # test = self.test_layer_1(test)
-            # test = test.view(-1, 64*32*32)
-            # test = self.fc_test(test)
-            # out_test.append(test)
+            test = self.maxpool(y)
+            test = self.test_layer_1(test)
+            test = test.view(-1, 64*32*32)
+            test = self.fc_test(test)
+            out_test.append(test)
 
 
             score = self.score[i](y) # score is like predicted logits ?
@@ -204,15 +204,15 @@ class HourglassNet(nn.Module):
                 score_ = self.score_[i](score)
                 x = x + fc_ + score_ # identity + fc_ (no semantic) + score_ (semantic)
 
-        return out
+        # return out
         
         # semantic
-        # return out, out_test
+        return out, out_test
 
 
 
 
-def hg(**kwargs):
-    model = HourglassNet(Bottleneck, num_stacks=kwargs['num_stacks'], num_blocks=kwargs['num_blocks'],
+def hg_semantic(**kwargs):
+    model = HourglassNet_semantic(Bottleneck, num_stacks=kwargs['num_stacks'], num_blocks=kwargs['num_blocks'],
                          num_classes=kwargs['num_classes'])
     return model

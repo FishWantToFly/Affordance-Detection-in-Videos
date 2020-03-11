@@ -1,0 +1,9 @@
+./dataset_lab_ito/lab_ito/chair_1/put_object_on_it_1_fake
+./dataset_lab_ito/lab_ito/chair_1/put_object_on_it_1
+./dataset_lab_ito/lab_ito/chair_1/remove_object_on_it_1_fake_2
+./dataset_lab_ito/lab_ito/chair_1/remove_object_on_it_1_fake
+./dataset_lab_ito/lab_ito/chair_1/two_chair_stable
+./dataset_lab_ito/lab_ito/chair_1/remove_object_on_it_1
+./dataset_lab_ito/lab_ito/chair_1/move_object_itself_1
+./dataset_lab_ito/lab_ito/chair_1/change_thing
+./dataset_lab_ito/lab_ito/chair_1/two_chair_put_things

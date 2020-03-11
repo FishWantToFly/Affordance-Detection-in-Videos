@@ -2,16 +2,22 @@
 
 Because I change the placement of direcctory, all codes below needs to be revised lightly.
 ---
-* demo.py (draw mask. not in this directory now)
-    * Detect instance single by single
-    1. pass
-
-
 * 1_data_process.py
     1. delete named dummy file
     2. remove redundant depth information (we pre-filter rgb framews in local)
     3. reorder (start from 00000)
     4. save depth txt -> numpy
+
+* 0_demo.py (draw mask) 
+    * Detect single instance
+    * Should download dataset down to local for picking which frames need to be labeled fist 
+    * !!! Execute 0_domo.py after 1_data_process.py -> mask would be ordered
+    1. source activate siammask
+    2. cd SiamMask
+    3. export PYTHONPATH=$PWD:$PYTHONPATH
+    4. cd $SiamMask/experiments/siammask_sharp
+    5. export PYTHONPATH=$PWD:$PYTHONPATH
+    6. python ../../tools/0_demo.py
 
 * 2_depth_inpaint.py
     1. transform to greyscale image (.txt -> .npy -> .png)
