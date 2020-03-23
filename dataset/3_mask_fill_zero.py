@@ -11,7 +11,7 @@ from PIL import Image
 
 ######################################################
 # Step 1 : visualize from raw depth information (transform to greyscale image)
-test_action = "/home/s5078345/affordance/dataset/lab/chair_1/move_object_with_thing_in_it/"
+# test_action = "/home/s5078345/affordance/dataset/lab/chair_1/move_object_with_thing_in_it/"
 depth_dir = 'raw_depth'
 frame_dir = 'raw_frames'
 mask_dir = 'mask'
@@ -20,7 +20,8 @@ black_image_path = "/home/s5078345/Affordance-Detection-on-Video/dataset/all_bla
 black_image = Image.open(black_image_path)
 black_image = black_image.convert("RGB")
 
-dataset_name = 'dataset_lab_ito'
+# dataset_name = 'dataset_lab_ito'
+dataset_name = 'tohoku'
 
 # delete redundant depth
 for action in glob.glob("./%s/*/*/*" % (dataset_name)):

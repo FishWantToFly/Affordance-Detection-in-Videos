@@ -1,7 +1,17 @@
-2020.2.10 
+2020.3.18 update
 
-Because I change the placement of direcctory, all codes below needs to be revised lightly.
+If you want to add new dataset in original datset, 
+make sure you do it in seperate directory, and after do steps below,
+move it into dataset_original
+
+Issue : 
+1. sometimes can't import cv2
+    A : use siammask environment
+
 ---
+* Preprocess in local 
+    1. remove useless rgb frames, only leave useful rgb frames
+
 * 1_data_process.py
     1. delete named dummy file
     2. remove redundant depth information (we pre-filter rgb framews in local)

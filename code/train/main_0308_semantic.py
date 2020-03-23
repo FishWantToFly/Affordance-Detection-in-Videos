@@ -2,7 +2,6 @@
 # training 
 python main.py
 # training using only 10 actions (for test)
-python main.py -t 
 
 # resume training from checkpoint
 python main.py --resume ./checkpoint/checkpoint_20.pth.tar
@@ -12,10 +11,10 @@ python main.py --resume ./checkpoint/checkpoint_20.pth.tar -w
 python main.py --resume ./checkpoint/checkpoint_20.pth.tar -e -d 
 
 # relabel train/test (visualize in same architecture)
-python main.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
+python main.py --resume ./checkpoint_0301_iou/checkpoint_best_iou.pth.tar -c ./checkpoint_0301_iou -e -r
 
 # temp
-python main_0307_depth.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
+python main.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -w
 '''
 from __future__ import print_function, absolute_import
 
@@ -56,6 +55,7 @@ dataset_names = sorted(name for name in datasets.__dict__
 
 
 # init global variables
+best_acc = 0
 best_iou = 0
 idx = []
 
@@ -65,6 +65,54 @@ RELABEL = False
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 cudnn.benchmark = True  # There is BN issue for early version of PyTorch
                         # see https://github.com/bearpaw/pytorch-pose/issues/33
+
+def draw_line_chart_semantic(args, log_read_dir):
+    list_of_lists = []
+    with open(log_read_dir) as f:
+        for line in f:
+            inner_list = [elt.strip() for elt in line.split('\t')]
+            # in alternative, if you need to use the file content as numbers
+            # inner_list = [int(elt.strip()) for elt in line.split(',')]
+            list_of_lists.append(inner_list)
+    epoch_idx_list = []
+    train_mask_loss_list, train_sem_loss_list, val_mask_loss_list, val_sem_loss_list = [], [], [], []
+    val_iou_list, val_sem_acc_list = [], []
+    list_len = len(list_of_lists)
+    for i in range(1, list_len):
+        epoch_idx_list.append(i)
+        train_mask_loss_list.append(float(list_of_lists[i][1]))
+        train_sem_loss_list.append(float(list_of_lists[i][2]))
+        val_mask_loss_list.append(float(list_of_lists[i][3]))
+        val_sem_loss_list.append(float(list_of_lists[i][4]))
+        val_iou_list.append(float(list_of_lists[i][5]))
+        val_sem_acc_list.append(float(list_of_lists[i][6]))
+
+    plt.xlabel('Epoch')
+    plt.plot(epoch_idx_list, train_mask_loss_list)
+    plt.plot(epoch_idx_list, val_mask_loss_list)
+    plt.legend(['Train mask loss', 'Val mask loss'], loc='upper left')
+    plt.savefig(os.path.join(args.checkpoint, 'log_mask_loss.png'))
+    plt.cla()
+
+    plt.xlabel('Epoch')
+    plt.plot(epoch_idx_list, train_sem_loss_list)
+    plt.plot(epoch_idx_list, val_sem_loss_list)
+    plt.legend(['Train sem loss', 'Val sem loss'], loc='upper left')
+    plt.savefig(os.path.join(args.checkpoint, 'log_sem_loss.png'))
+    plt.cla()
+
+    plt.xlabel('Epoch')
+    plt.plot(epoch_idx_list, val_iou_list)
+    plt.legend(['Val iou'], loc='upper left')
+    plt.savefig(os.path.join(args.checkpoint, 'log_iou.png'))
+    plt.cla()
+
+    plt.xlabel('Epoch')
+    plt.plot(epoch_idx_list, val_sem_acc_list)
+    plt.legend(['Val sem acc'], loc='upper left')
+    plt.savefig(os.path.join(args.checkpoint, 'log_sem_acc.png'))
+    plt.cla()
+
 
 def draw_line_chart(args, log_read_dir):
     list_of_lists = []
@@ -98,6 +146,7 @@ def draw_line_chart(args, log_read_dir):
     plt.cla()
 
 def main(args):
+    global best_acc
     global best_iou
     global idx
 
@@ -117,8 +166,9 @@ def main(args):
 
     # write line-chart and stop program
     if args.write: 
-        draw_line_chart(args, os.path.join(args.checkpoint, 'log.txt'))
+        draw_line_chart_semantic(args, os.path.join(args.checkpoint, 'log.txt'))
         return
+
 
     # idx is the index of joints used to compute accuracy
     if args.dataset in ['mpii', 'lsp']:
@@ -149,6 +199,9 @@ def main(args):
 
     # define loss function (criterion) and optimizer
     criterion = losses.IoULoss().to(device)
+    criterion_semantic = losses.SemanticLoss().to(device)
+    criterions = [criterion, criterion_semantic]
+    # criterion = losses.JointsMSELoss().to(device)
 
     if args.solver == 'rms':
         optimizer = torch.optim.RMSprop(model.parameters(),
@@ -181,7 +234,8 @@ def main(args):
             print("=> no checkpoint found at '{}'".format(args.resume))
     else:
         logger = Logger(join(args.checkpoint, 'log.txt'), title=title)
-        logger.set_names(['Epoch', 'LR', 'Train Loss', 'Val Loss', 'Val IoU'])
+        logger.set_names(['Epoch', 'TrainMaskLoss', 'TrainSemLoss', 'ValMaskLoss', 'ValSemLoss', \
+        'ValIoU', 'ValSemAcc'])
 
     print('    Total params: %.2fM'
           % (sum(p.numel() for p in model.parameters())/1000000.0))
@@ -215,7 +269,7 @@ def main(args):
         RELABEL = True
         if args.evaluate:
             print('\nRelabel val label')
-            loss, iou, predictions = validate(val_loader, model, criterion, njoints,
+            loss, iou, predictions = validate(val_loader, model, criterions, njoints,
                                     args.checkpoint, args.debug, args.flip)
             return 
 
@@ -224,25 +278,23 @@ def main(args):
     JUST_EVALUATE = False
     if args.evaluate:
         print('\nEvaluation only')
-        if args.debug :
+        if arg.debug :
             print('Draw pred /gt heatmap')
         JUST_EVALUATE = True
-        loss, iou, predictions = validate(val_loader, model, criterion, njoints,
+        loss, iou, predictions = validate(val_loader, model, criterions, njoints,
                                            args.checkpoint, args.debug, args.flip)
         print("Val IoU: %.3f" % (iou))
         return
 
+
     ## backup when training starts
-    code_backup_dir = 'code_backup'
-    mkdir_p(os.path.join(args.checkpoint, code_backup_dir))
-    os.system('cp ../affordance/models/hourglass.py %s/%s/hourglass.py' % (args.checkpoint, code_backup_dir))
-    os.system('cp ../affordance/datasets/sad.py %s/%s/sad.py' % (args.checkpoint, code_backup_dir))
-    os.system('cp ./main_0307_depth.py %s/%s/main_0307_depth.py' % (args.checkpoint, code_backup_dir))
+    os.system('cp ../affordance/models/hourglass.py %s/hourglass.py' % args.checkpoint)
+    os.system('cp ./main_0308_semantic.py %s/main_0308_semantic.py' % args.checkpoint)
 
     # train and eval
     lr = args.lr
-    for epoch in range(args.start_epoch, args.epochs):        
-        # test for 10 epoch
+    for epoch in range(args.start_epoch, args.epochs):
+        # for test 10 epoch
         if args.test and epoch == 11:
             break
 
@@ -255,20 +307,21 @@ def main(args):
             val_loader.dataset.sigma *=  args.sigma_decay
 
         # train for one epoch
-        train_loss = train(train_loader, model, criterion, optimizer,
+        train_mask_loss, train_sem_loss = train(train_loader, model, criterions, optimizer,
                                       args.debug, args.flip)
 
         # evaluate on validation set
-        valid_loss, valid_iou, predictions = validate(val_loader, model, criterion,
+        val_mask_loss, val_sem_loss, val_iou, val_sem_acc = validate(val_loader, model, criterions,
                                                   njoints, args.checkpoint, args.debug, args.flip)
-        print("Val IoU: %.3f" % (valid_iou))
+        print("Val IoU: %.3f" % (val_iou))
 
         # append logger file
-        logger.append([epoch + 1, lr, train_loss, valid_loss, valid_iou])
+        logger.append([epoch + 1, train_mask_loss, train_sem_loss, val_mask_loss, val_sem_loss, \
+            val_iou, val_sem_acc])
 
         # remember best acc and save checkpoint
-        is_best_iou = valid_iou > best_iou
-        best_iou = max(valid_iou, best_iou)
+        is_best_iou = val_iou > best_iou
+        best_iou = max(val_iou, best_iou)
         save_checkpoint({
             'epoch': epoch + 1,
             'arch': args.arch,
@@ -282,11 +335,14 @@ def main(args):
     print("Best iou = %.3f" % (best_iou))
     draw_line_chart(args, os.path.join(args.checkpoint, 'log.txt'))
 
-def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
+def train(train_loader, model, criterions, optimizer, debug=False, flip=True):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
+    losses_mask = AverageMeter()
+    losses_sem = AverageMeter()
 
+    criterion, criterion_semantic = criterions
     # switch to train mode
     model.train()
 
@@ -294,28 +350,38 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
 
     gt_win, pred_win = None, None
     bar = Bar('Train', max=len(train_loader))
-    for i, (input, input_depth, target, meta) in enumerate(train_loader):
+    for i, (input, input_depth, target, target_semantic, meta) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
 
         input, input_depth, target = input.to(device), input_depth.to(device), target.to(device, non_blocking=True)
         target_weight = meta['target_weight'].to(device, non_blocking=True)
+        target_semantic = target_semantic.to(device)
 
         # compute output
         # output = model(input)
-        output = model(torch.cat((input, input_depth), 1))
+        output, out_semantic = model(torch.cat((input, input_depth), 1))
 
         if type(output) == list:  # multiple output # beacuse of intermediate prediction
             loss = 0
+            loss_mask = 0
+            loss_sem = 0
             for o in output:
-                loss += criterion(o, target, target_weight)
+                loss_mask += criterion(o, target, target_weight)
+            for o_sem in out_semantic:
+                _loss = criterion_semantic(o_sem, target_semantic) * 10
+                loss_sem += _loss
+            loss += loss_mask + loss_sem
             output = output[-1]
+            output_semantic = out_semantic[-1]
         else:  # single output
             loss = criterion(output, target, target_weight)
-        acc = accuracy(output, target, idx)
+        # acc = accuracy(output, target, idx)
         
         # measure accuracy and record loss
         losses.update(loss.item(), input.size(0))
+        losses_mask.update(loss_mask.item(), input.size(0))
+        losses_sem.update(loss_sem.item(), input.size(0))
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -339,18 +405,22 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
         bar.next()
 
     bar.finish()
-    return losses.avg
+    return losses_mask.avg, losses_sem.avg
 
 
-def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False, flip=True):
+def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False, flip=True):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
+    losses_mask = AverageMeter()
+    losses_sem = AverageMeter()
     ioues = AverageMeter()
+    acces_sem = AverageMeter()
 
     # predictions
-    predictions = torch.Tensor(val_loader.dataset.__len__(), num_classes, 2)
+    # predictions = torch.Tensor(val_loader.dataset.__len__(), num_classes, 2)
 
+    criterion, criterion_semantic = criterions
     # switch to evaluate mode
     model.eval()
 
@@ -359,7 +429,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
     end = time.time()
     bar = Bar('Eval ', max=len(val_loader))
     with torch.no_grad():
-        for i, (input, input_depth, target, meta) in enumerate(val_loader):
+        for i, (input, input_depth, target, target_semantic, meta) in enumerate(val_loader):
             # measure data loading time
             data_time.update(time.time() - end)
 
@@ -367,11 +437,12 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             input_depth = input_depth.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
             target_weight = meta['target_weight'].to(device, non_blocking=True)
+            target_semantic = target_semantic.to(device, non_blocking=True)
 
             # compute output
             # output = model(input)
-            output = model(torch.cat((input, input_depth), 1))
-            score_map = output[-1].cpu() if type(output) == list else output.cpu()
+            output, out_semantic = model(torch.cat((input, input_depth), 1))
+            # score_map = output[-1].cpu() if type(output) == list else output.cpu()
             # if flip:
             #     flip_input = torch.from_numpy(fliplr(input.clone().numpy())).float().to(device)
             #     flip_output = model(flip_input)
@@ -379,15 +450,26 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             #     flip_output = flip_back(flip_output)
             #     score_map += flip_output
 
-            if type(output) == list:  # multiple output
+            if type(output) == list:  # multiple output # beacuse of intermediate prediction
                 loss = 0
+                loss_sem = 0
+                loss_mask = 0
                 for o in output:
-                    loss += criterion(o, target, target_weight)
+                    loss_mask += criterion(o, target, target_weight)
+                for o_sem in out_semantic:
+                    _loss = criterion_semantic(o_sem, target_semantic) * 10
+                    loss_sem += _loss
+                loss += loss_mask + loss_sem
                 output = output[-1]
+                output_semantic = out_semantic[-1]
             else:  # single output
                 loss = criterion(output, target, target_weight)
 
-            # acc = accuracy(score_map, target.cpu(), idx)
+            ## measure semantic accuracy
+            _, semantic_predict = torch.max(output_semantic, 1)
+            acc_sem = (semantic_predict == target_semantic).sum() / semantic_predict.shape[0]
+            # acc_sem = 0
+
             iou = intersectionOverUnion(output.cpu(), target.cpu(), idx) # have not tested
 
             # generate predictions
@@ -416,12 +498,13 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                 plt.plot()
                 plt.savefig(os.path.join(save_fig_dir, '%d.png' % (i)))
 
+            # SELDOM USE
             if RELABEL:
                 # save in same checkpoint
                 raw_mask_path = meta['mask_path'][0]
                 temp_head = ('/').join(raw_mask_path.split('/')[:-8])
                 temp_tail = ('/').join(raw_mask_path.split('/')[-5:])
-                temp = os.path.join(temp_head, 'code/train', checkpoint, 'pred_vis', temp_tail)
+                temp = os.path.join(temp_head, 'pytorch-pose/example', checkpoint, 'pred_vis', temp_tail)
                 relabel_mask_dir, relabel_mask_name = os.path.split(temp)
                 relabel_mask_dir = os.path.dirname(relabel_mask_dir)
 
@@ -461,8 +544,12 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
 
             # measure accuracy and record loss
             losses.update(loss.item(), input.size(0))
-            # acces.update(acc[0], input.size(0))
+            losses_mask.update(loss_mask.item(), input.size(0))
+            losses_sem.update(loss_sem.item(), input.size(0))
+
             ioues.update(iou, input.size(0))
+
+            acces_sem.update(acc_sem, input.size(0))
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -480,17 +567,15 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                         )
             bar.next()
         bar.finish()
-    return losses.avg, ioues.avg, predictions
+    return losses_mask.avg, losses_sem.avg, ioues.avg, acces_sem.avg
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-    # Dataset setting
-
     # if want to use semantic 
     # dataset : sad -> sad_semantic
     # arch : hg -> hg_semantic
 
-    parser.add_argument('--dataset', metavar='DATASET', default='sad',
+    parser.add_argument('--dataset', metavar='DATASET', default='sad_semantic',
                         choices=dataset_names,
                         help='Datasets: ' +
                             ' | '.join(dataset_names) +
@@ -510,8 +595,10 @@ if __name__ == '__main__':
     parser.add_argument('--dataset-list-dir-path', default='/home/s5078345/Affordance-Detection-on-Video/dataset/data_list', type=str,
                     help='dir of train/test data list')
 
+
+
     # Model structure
-    parser.add_argument('--arch', '-a', metavar='ARCH', default='hg',
+    parser.add_argument('--arch', '-a', metavar='ARCH', default='hg_semantic',
                         choices=model_names,
                         help='model architecture: ' +
                             ' | '.join(model_names) +
@@ -537,10 +624,10 @@ if __name__ == '__main__':
                         help='manual epoch number (useful on restarts)')
 
     # 2 GPU setting
-    # parser.add_argument('--train-batch', default=20, type=int, metavar='N', # if andy takes GPU
-    #                     help='train batchsize')
-    parser.add_argument('--train-batch', default=30, type=int, metavar='N',
+    parser.add_argument('--train-batch', default=20, type=int, metavar='N', # if andy takes GPU
                         help='train batchsize')
+    # parser.add_argument('--train-batch', default=30, type=int, metavar='N',
+                        # help='train batchsize')
     parser.add_argument('--test-batch', default=10, type=int, metavar='N',
                         help='test batchsize')
 

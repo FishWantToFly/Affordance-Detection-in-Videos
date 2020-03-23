@@ -12,7 +12,6 @@ from PIL import Image
 import statistics 
 
 ######################################################
-test_action = "/home/s5078345/Affordance-Detection-on-Video/dataset/dataset_original/lab/chair_1/move_object_with_thing_in_it/"
 depth_dir = 'inpaint_depth'
 frame_dir = 'raw_frames'
 mask_dir = 'mask'

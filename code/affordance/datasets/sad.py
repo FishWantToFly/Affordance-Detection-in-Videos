@@ -35,25 +35,19 @@ class Sad(data.Dataset):
 
         # contain img and annotation
 
-        # if kwargs['relabel']: # for relabel / visualization
-        #     self.train_list = self.load_full_file_list('test_list_10') # dummy
-        #     self.valid_list = self.load_full_file_list('all_original_data_list') # test on original data is enough
-        # elif kwargs['test'] == False:
-        #     self.train_list = self.load_full_file_list('train_list')
-        #     self.valid_list = self.load_full_file_list('test_list')
-        # else :
-        #     self.train_list = self.load_full_file_list('train_list_10')
-        #     self.valid_list = self.load_full_file_list('test_list_10')
+        if kwargs['relabel']: # for relabel / visualization
+            self.train_list = self.load_full_file_list('test_list_10_v3') # dummy
+            self.valid_list = self.load_full_file_list('original_data_list_v3') # test on original data is enough
+        elif kwargs['test'] == False:
+            self.train_list = self.load_full_file_list('train_list_v3')
+            self.valid_list = self.load_full_file_list('test_list_v3')
+        else :
+            self.train_list = self.load_full_file_list('train_list_10_v3')
+            self.valid_list = self.load_full_file_list('test_list_10_v3')
 
         # # for multi-object
         # self.train_list = self.load_full_file_list('train_list_10')
         # self.valid_list = self.load_full_file_list('data_lab_ito')
-
-        # 2020.3.10 for testing mutually exclusive
-        self.train_list = self.load_full_file_list('train_list_v2')
-        self.valid_list = self.load_full_file_list('test_list_v2')
-
-
 
     def load_full_file_list(self, data_list):
         all_files = []

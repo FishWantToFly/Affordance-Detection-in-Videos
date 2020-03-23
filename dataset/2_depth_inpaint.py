@@ -15,7 +15,8 @@ import numpy as np
 from os import walk
 from PIL import Image
 
-dataset_name = 'dataset_lab_ito'
+# dataset_name = 'dataset_lab_ito'
+dataset_name = 'tohoku'
 
 ######################################################
 # Step 1 : visualize from raw depth information (transform to greyscale image)

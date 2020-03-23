@@ -30,7 +30,10 @@ for action in glob.glob("../dataset/dataset_original/*/*/*"):
 	# count unique action and record
 	_, _action = os.path.split(action)
 	x = re.search("_[0-9]+", _action)
-	if x is None and _action not in action_unique_list:
+
+	if x is not None :
+		_action = _action[:-2]
+	if _action not in action_unique_list:
 		action_unique_list.append(_action)
 
 	# count frame number of each action
@@ -38,8 +41,18 @@ for action in glob.glob("../dataset/dataset_original/*/*/*"):
 	frames_number = len(action_frames)
 	action_frames_list.append(frames_number)
 
+	# if frames_number < 6:
+	# 	print(action)
 
-print("Total action number = %d" % (action_total))
+	# find cases that does not label mask
+		# if not os.path.exists(os.path.join(action, mask_dir)):
+		# 	print(action)
+
+	if _action == 'push_object_down' :
+		print(action)
+
+
+print("\nTotal action number = %d" % (action_total))
 print("Total unique action number = %d" % (len(action_unique_list)))
 print("Action list : ")
 print(action_unique_list)

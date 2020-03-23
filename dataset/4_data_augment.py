@@ -22,8 +22,8 @@ def create_dir(new_dir):
 
 
 # ######################################################
-# Step 1 : horizontally flip 
-# test_action = "/home/s5078345/Affordance-Detection-on-Video/dataset/dataset_original/lab/chair_1/put_big_object_on_it"
+# # Step 1 : horizontally flip 
+# # test_action = "/home/s5078345/Affordance-Detection-on-Video/dataset/dataset_original/lab/chair_1/put_big_object_on_it"
 # depth_dir = 'raw_depth'
 # frame_dir = 'raw_frames'
 # mask_dir = 'mask'
@@ -99,6 +99,12 @@ mask_dir = 'mask'
 depth_dir = 'inpaint_depth'
 now_dir = os.getcwd()
 
+os.remove("error.txt")
+fo = open("error.txt", "w")
+fo.write("Failuse case for 4_data_augment.py")
+
+
+
 # 1.
 # source_dir_name = 'dataset_original'
 # copy_dir_name = 'dataset_brightness_contrast'
@@ -109,7 +115,7 @@ copy_dir_name = 'dataset_flip_brightness_contrast'
 if not os.path.exists(copy_dir_name):
 	os.mkdir(copy_dir_name)
 
-for action in glob.glob("./%s/*/*/*" % (source_dir_name)):
+for action in sorted(glob.glob("./%s/*/*/*" % (source_dir_name))):
 	# action = test_action
 	_, _action = os.path.split(action)
 	print(action)
@@ -150,16 +156,21 @@ for action in glob.glob("./%s/*/*/*" % (source_dir_name)):
 		_, _frame = os.path.split(frame)
 		frame_img = Image.open(frame)
 
-		# Adjust sharpness or brightnesss
-		if random_1 > 0.6 :
-			frame_img = ImageEnhance.Sharpness(frame_img)
-			frame_img = frame_img.enhance(10.0)		
-		else :
-			frame_img = ImageEnhance.Brightness(frame_img)
-			if random_2 > 0.5 :
-				frame_img = frame_img.enhance(1.35)
+		try:
+			# Adjust sharpness or brightnesss
+			if random_1 > 0.6 :
+				frame_img = ImageEnhance.Sharpness(frame_img)
+				frame_img = frame_img.enhance(10.0)		
 			else :
-				frame_img = frame_img.enhance(0.8)
+				frame_img = ImageEnhance.Brightness(frame_img)
+				if random_2 > 0.5 :
+					frame_img = frame_img.enhance(1.35)
+				else :
+					frame_img = frame_img.enhance(0.8)
+		except:
+			fo.write(action)
+			break
+
 		
 		# save adjusted img
 		enhance_frame_path = os.path.join(new_frame_path, _frame)
@@ -182,4 +193,5 @@ for action in glob.glob("./%s/*/*/*" % (source_dir_name)):
 		depth_mirror = depth_mirror.reshape(480, 640, 1)
 		depth_mirror_path = os.path.join(new_depth_path, _depth)
 		np.save(depth_mirror_path, depth_mirror)
-		
+
+fo.close()
