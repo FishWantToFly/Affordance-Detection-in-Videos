@@ -6,6 +6,9 @@ Split train / test to mutually exclusive
 2020.3.23
 1. just use chair and table as training / testing data
 2. use specific place and object as testing data, other as training data
+
+2020.3.26
+For test data, we just test on original one
 '''
 
 import glob, os, copy, random
@@ -27,18 +30,21 @@ depth_dir = 'inpaint_depth'
 now_dir = os.getcwd()
 
 data_list, train_list, test_list = [], [], []
-datasets = ['dataset_original', 'dataset_horizontally_flip', 'dataset_flip_brightness_contrast', 'dataset_brightness_contrast']
-
+datasets = ['dataset_original', 'dataset_horizontally_flip', 'dataset_flip_brightness_contrast', 'dataset_brightness_contrast', \
+'dataset_original_so', 'dataset_horizontally_flip_so', 'dataset_flip_brightness_contrast_so', 'dataset_brightness_contrast_so']
 
 '''
 v3
 '''
 train_test_objects = ['table', 'chair']
-test_place_object_1 = ['tohoku_lab', 'table']
-test_place_object_2 = ['lab', 'chair']
 test_place_object_list = []
-test_place_object_list.append(test_place_object_1)
-test_place_object_list.append(test_place_object_2)
+# for testing
+test_place_object_list.append(['tohoku_lab', 'table'])
+test_place_object_list.append(['lab', 'chair'] )
+
+# new add
+test_place_object_list.append(['tohoku_meeting_room', 'table'])
+test_place_object_list.append(['my_room', 'chair'] )
 
 for dataset in datasets:
 	for action in glob.glob("./%s/*/*/*" % (dataset)):
@@ -50,9 +56,9 @@ for dataset in datasets:
 			continue
 
 		## choose train or test
-		if [place, _object] in test_place_object_list : 
+		if [place, _object] in test_place_object_list and dataset == 'dataset_original': 
 			test_list.append(action)
-		else :
+		elif [place, _object] not in test_place_object_list:
 			train_list.append(action)
 
 print("Train data len : %d" % (len(train_list)))
@@ -92,7 +98,7 @@ with open(all_save_dir, 'w') as f:
 	for action in data_list:
 		f.write("%s\n" % action)
 
-
+print("Original data len = %d" % (len(data_list)))
 
 '''
 v2 

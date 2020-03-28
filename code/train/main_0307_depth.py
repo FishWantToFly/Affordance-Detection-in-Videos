@@ -15,7 +15,7 @@ python main.py --resume ./checkpoint/checkpoint_20.pth.tar -e -d
 python main.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
 
 # temp
-python main_0307_depth.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
+python main_0307_depth.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -w
 '''
 from __future__ import print_function, absolute_import
 
