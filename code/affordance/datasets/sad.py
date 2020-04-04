@@ -66,65 +66,100 @@ class Sad(data.Dataset):
             semantic_name = os.path.basename(os.path.dirname(action)).split('_')[0]
             semantic_label = self.semantic_dict[semantic_name]
 
-            for frame in action_rgb_frames :
-                frame_name = os.path.basename(frame)
-                frame_dir_dir = os.path.dirname(os.path.dirname(frame))
-                mask = os.path.join(frame_dir_dir, mask_dir_name, frame_name[:-4] + '.jpg')
-                depth = os.path.join(frame_dir_dir, depth_dir_name, frame_name[:-4] + '.npy')
-                all_files.append([frame, mask, depth])
-                # print(frame)
-                # print(mask)
-                # print()
+            # for video training
+            # each time there are 6 feames, overlap = 2 frames
+            sorted_action_rgb_frames = sorted(action_rgb_frames)
+            start_frame = -4 # -> 0
+            end_frame = -1 # -> 3
+            
+            
+            while (end_frame < len(sorted_action_rgb_frames)) :
+                start_frame += 4
+                end_frame += 4
+                if (end_frame + 6) >= len(action_rgb_frames) - 1:
+                    end_frame = len(action_rgb_frames) - 1
+                    start_frame = end_frame - 6
+
+                temp = []
+                for i in range(6):
+                    frame = sorted_action_rgb_frames[start_frame + i] 
+                    frame_name = os.path.basename(frame)
+                    frame_dir_dir = os.path.dirname(os.path.dirname(frame))
+                    mask = os.path.join(frame_dir_dir, mask_dir_name, frame_name[:-4] + '.jpg')
+                    depth = os.path.join(frame_dir_dir, depth_dir_name, frame_name[:-4] + '.npy')
+                    temp.append([frame, mask, depth])
+
+                # reach the end
+                if end_frame == len(action_rgb_frames) - 1:
+                    all_files.append(temp)
+                    break
+
+            # for frame in sorted(action_rgb_frames) :
+            #     frame_name = os.path.basename(frame)
+            #     frame_dir_dir = os.path.dirname(os.path.dirname(frame))
+            #     mask = os.path.join(frame_dir_dir, mask_dir_name, frame_name[:-4] + '.jpg')
+            #     depth = os.path.join(frame_dir_dir, depth_dir_name, frame_name[:-4] + '.npy')
+            #     all_files.append([frame, mask, depth])
+            #     # print(frame)
+            #     # print(mask)
+            #     # print()
         return all_files
+
 
     
     def __getitem__(self, index):
+        video_len = 6
+
+        # img_path, mask_path, depth_path = self.train_list[index]
         if self.is_train:
-            img_path, mask_path, depth_path = self.train_list[index]
-        else    :
-            img_path, mask_path, depth_path = self.valid_list[index]
+            video_data = self.train_list[index]
+        else :
+            video_data = self.valid_list[index]
 
-        # load image and mask
-        img = load_image(img_path)  # CxHxW
-        a = load_mask(mask_path)    # 1xHxW
-        depth = load_depth(depth_path)
-        
-        # pts = torch.Tensor(a['joint_self']) # [16, 3]
-        # pts[:, 0:2] -= 1  # Convert pts to zero based
+        video_input = torch.zeros(video_len, 3, self.inp_res, self.inp_res)
+        video_input_depth = torch.zeros(video_len, 1, self.inp_res, self.inp_res)
+        video_target = torch.zeros(video_len, 1, self.out_res, self.out_res)
 
-        # c = torch.Tensor(a['objpos']) # [2]
-        # s = a['scale_provided'] # The scale keeps the height of the person as about 200 px.
+        for j in range(video_len):
+            img_path, mask_path, depth_path = video_data[j]
 
-        nparts = 1 # should change if target is more than 2
-
-        # Prepare image and groundtruth map
-        # inp = crop(img, c, s, [self.inp_res, self.inp_res], rot=r)
-        inp = resize(img, self.inp_res, self.inp_res) # get normalized rgb value
-        input_depth = resize(depth, self.inp_res, self.inp_res)
-
-
-        # Generate ground truth
-        # tpts = a.clone() # target points [16, 3]
-        target = torch.zeros(nparts, self.out_res, self.out_res) # [1, out_res, out_res]
-        # target_weight = tpts[:, 2].clone().view(nparts, 1) # [16, 1] value is 0 or 1
-        target_weight = torch.ones(1, 1) # [nparts, 1]
-
-        for i in range(nparts):
-            # if tpts[i, 1] > 0:
-            #     tpts[i, 0:2] = to_torch(transform(tpts[i, 0:2]+1, c, s, [self.out_res, self.out_res], rot=r))
-            #     target[i], vis = draw_labelmap(target[i], tpts[i]-1, self.sigma, type=self.label_type)
-            #     target_weight[i, 0] *= vis
+            # load image and mask
+            img = load_image(img_path)  # CxHxW
+            a = load_mask(mask_path)    # 1xHxW
+            depth = load_depth(depth_path)
             
-            # set all target weight to 1 (actually we have only 1 target)
+            # pts = torch.Tensor(a['joint_self']) # [16, 3]
+            # pts[:, 0:2] -= 1  # Convert pts to zero based
 
-            target[i] = resize(a[i], self.out_res, self.out_res)
+            # c = torch.Tensor(a['objpos']) # [2]
+            # s = a['scale_provided'] # The scale keeps the height of the person as about 200 px.
+
+            nparts = 1 # should change if target is more than 2
+
+            # Prepare image and groundtruth map
+            # inp = crop(img, c, s, [self.inp_res, self.inp_res], rot=r)
+            inp = resize(img, self.inp_res, self.inp_res) # get normalized rgb value
+            input_depth = resize(depth, self.inp_res, self.inp_res)
+
+
+            # Generate ground truth
+            # tpts = a.clone() # target points [16, 3]
+            target = torch.zeros(nparts, self.out_res, self.out_res) # [1, out_res, out_res]
+            # target_weight = torch.ones(1, 1) # [nparts, 1]
+
+            for i in range(nparts):
+                target[i] = resize(a[i], self.out_res, self.out_res)
+
+            video_input[j] = inp
+            video_input_depth[j] = input_depth
+            video_target[j] = target
 
 
         # Meta info
         # meta = {'index' : index, 'pts' : pts, 'tpts' : tpts, 'target_weight': target_weight}
-        meta = {'index': index, 'target_weight': target_weight, 'mask_path': mask_path}
+        meta = {'index': index, 'mask_path': mask_path}
         
-        return inp, input_depth, target, meta
+        return video_input, video_input_depth, video_target, meta
 
     def __len__(self):
         if self.is_train:

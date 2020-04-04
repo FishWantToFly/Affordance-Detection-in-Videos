@@ -5,6 +5,7 @@ Use lr=0.01 for current version
 '''
 import torch.nn as nn
 import torch.nn.functional as F
+import torch
 
 # from .preresnet import BasicBlock, Bottleneck
 
@@ -104,9 +105,16 @@ class HourglassNet(nn.Module):
         self.inplanes = 64 # feature dim after "input -> conv" at start ?
         self.num_feats = 128
         self.num_stacks = num_stacks
-        # input channel number. 3 (RGB) + 1 (depth)
+
+        # # input channel number. 3 (RGB) + 1 (depth)
         self.conv1 = nn.Conv2d(4, self.inplanes, kernel_size=7, stride=2, padding=3,
                                bias=True)
+
+        
+        #  input channel number. 3 (RGB) + 1 (depth) + 1 (last_pred_mask)
+        # self.conv1 = nn.Conv2d(5, self.inplanes, kernel_size=7, stride=2, padding=3,
+                            #    bias=True)
+
         self.bn1 = nn.BatchNorm2d(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
         # layer1 to layer3 are placed in front of stacked hourglass model
@@ -119,7 +127,6 @@ class HourglassNet(nn.Module):
         ### semantic
         # self.test_layer_1 = nn.Conv2d(256, 64, kernel_size=1, bias=True)
         # self.fc_test = nn.Linear(64 * 32 * 32, 5)
-
 
         ch = self.num_feats*block.expansion
         hg, res, fc, score, fc_, score_ = [], [], [], [], [], []
@@ -137,6 +144,10 @@ class HourglassNet(nn.Module):
         self.score = nn.ModuleList(score)
         self.fc_ = nn.ModuleList(fc_) # reverse feature_num of fc 
         self.score_ = nn.ModuleList(score_)  # reverse feature_num of score 
+
+        ### prev mask
+        self.last_mask_layer = nn.Conv2d(ch + 1, ch, kernel_size=1, bias=True)
+        self.dropout_layer = nn.Dropout(p=0.75)
 
     def _make_residual(self, block, planes, blocks, stride=1):
         '''
@@ -170,7 +181,7 @@ class HourglassNet(nn.Module):
                 self.relu,
             )
 
-    def forward(self, x):
+    def forward(self, x, last_pred_mask = None):
         out = []
         out_test = []
         x = self.conv1(x)
@@ -180,29 +191,28 @@ class HourglassNet(nn.Module):
         x = self.layer1(x)
         x = self.maxpool(x)
         x = self.layer2(x) # layer before stacked hourgasss model
-        x = self.layer3(x) # layer before stacked hourgasss model
+        x = self.layer3(x) # layer before stacked hourgasss model # [256, 64, 64]
         
         for i in range(self.num_stacks):
             y = self.hg[i](x)
+            y = self.dropout_layer(y)
             y = self.res[i](y)
             y = self.fc[i](y) # 256 x 64 x 64
 
-            ## semantic
-            # test = self.maxpool(y)
-            # test = self.test_layer_1(test)
-            # test = test.view(-1, 64*32*32)
-            # test = self.fc_test(test)
-            # out_test.append(test)
+            # add last pred mask at first stack
+            if i == 0:
+                y = self.last_mask_layer(torch.cat((y, last_pred_mask), 1))
+            else :
+                y = self.dropout_layer(y)
 
-
-            score = self.score[i](y) # score is like predicted logits ?
+            score = self.score[i](y) # blue block in hourglass paper
             ## 2020.3.1 for IoU loss
             score = self.sigmoid(score)
             out.append(score) # for computing intermediate loss
             if i < self.num_stacks-1:
-                fc_ = self.fc_[i](y)
-                score_ = self.score_[i](score)
-                x = x + fc_ + score_ # identity + fc_ (no semantic) + score_ (semantic)
+                fc_ = self.fc_[i](y) # middle feature project back
+                score_ = self.score_[i](score) # logits feature project back
+                x = x + fc_ + score_ # identity + fc_  + score_ 
 
         return out
         
