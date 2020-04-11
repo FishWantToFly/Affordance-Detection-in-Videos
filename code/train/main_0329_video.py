@@ -305,19 +305,39 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
         # target_weight = meta['target_weight'].to(device, non_blocking=True)
 
         batch_size = input.shape[0]
-        # compute output
-        # output = model(input)
-
         loss = 0
-        last_pred_mask = torch.zeros(batch_size, 1, 64, 64).to(device)
+        # store first two stack feature # 2 = first and second stack, 6 = video length
+        video_feature_cache = torch.zeros(batch_size, 6, 2, 256, 64, 64)
+
+        # first compute
         for j in range(6):
             input_now = input[:, j] # [B, 3, 256, 256]
             input_depth_now = input_depth[:, j]
             target_now = target[:, j]
-            output = model(torch.cat((input_now, input_depth_now), 1), last_pred_mask)
-            # last_pred_mask = output[-1].detach() # need detach ???
-            # last_pred_mask = F.interpolate(last_pred_mask, size=[256, 256], mode="bilinear", align_corners=True)
-            # last_pred_mask = last_pred_mask.to(device)
+            _, out_tsm_feature = model(torch.cat((input_now, input_depth_now), 1)) # [B, 4, 256, 256]
+            for k in range(2):
+                video_feature_cache[:, j, k] = out_tsm_feature[k]
+
+        # TSM module
+        b, t, _, c, h, w = video_feature_cache.size()
+        fold_div = 8
+        fold = c // fold_div
+        new_tsm_feature = torch.zeros(batch_size, 6, 2, 256, 64, 64)
+        for j in range(2):
+            x = video_feature_cache[:, :, j]
+            temp = torch.zeros(batch_size, 6, 256, 64, 64)
+            temp[:, :-1, :fold] = x[:, 1:, :fold]  # shift left
+            temp[:, 1:, fold: 2 * fold] = x[:, :-1, fold: 2 * fold]  # shift right
+            temp[:, :, 2 * fold:] = x[:, :, 2 * fold:]  # not shift
+            new_tsm_feature[:, :, j] = temp
+
+        new_tsm_feature = new_tsm_feature.to(device)
+        # compute use TSM feature
+        for j in range(6):
+            input_now = input[:, j] # [B, 3, 256, 256]
+            input_depth_now = input_depth[:, j]
+            target_now = target[:, j]
+            output, _ = model(torch.cat((input_now, input_depth_now), 1), True, new_tsm_feature[:, j])
 
             if type(output) == list:  # multiple output # beacuse of intermediate prediction
                 for o in output:
@@ -382,17 +402,40 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             
             batch_size = input.shape[0]
             loss = 0
-            last_pred_mask = torch.zeros(batch_size, 1, 64, 64).to(device)
             iou_list = []
 
+            # store first two stack feature # 2 = first and second stack, 6 = video length
+            video_feature_cache = torch.zeros(batch_size, 6, 2, 256, 64, 64)
+
+            # first compute
             for j in range(6):
                 input_now = input[:, j] # [B, 3, 256, 256]
                 input_depth_now = input_depth[:, j]
                 target_now = target[:, j]
+                _, out_tsm_feature = model(torch.cat((input_now, input_depth_now), 1)) # [B, 4, 256, 256]
+                for k in range(2):
+                    video_feature_cache[:, j, k] = out_tsm_feature[k]
 
-                output = model(torch.cat((input_now, input_depth_now), 1), last_pred_mask)
-                last_pred_mask = output[-1].detach() # need detach ???
-                # last_pred_mask = F.interpolate(last_pred_mask, size=[256, 256], mode="bilinear", align_corners=True)
+            # TSM module
+            b, t, _, c, h, w = video_feature_cache.size()
+            fold_div = 8
+            fold = c // fold_div
+            new_tsm_feature = torch.zeros(batch_size, 6, 2, 256, 64, 64)
+            for j in range(2):
+                x = video_feature_cache[:, :, j]
+                temp = torch.zeros(batch_size, 6, 256, 64, 64)
+                temp[:, :-1, :fold] = x[:, 1:, :fold]  # shift left
+                temp[:, 1:, fold: 2 * fold] = x[:, :-1, fold: 2 * fold]  # shift right
+                temp[:, :, 2 * fold:] = x[:, :, 2 * fold:]  # not shift
+                new_tsm_feature[:, :, j] = temp
+
+            new_tsm_feature = new_tsm_feature.to(device)
+            # compute use TSM feature
+            for j in range(6):
+                input_now = input[:, j] # [B, 3, 256, 256]
+                input_depth_now = input_depth[:, j]
+                target_now = target[:, j]
+                output, _ = model(torch.cat((input_now, input_depth_now), 1), True, new_tsm_feature[:, j])
 
                 if type(output) == list:  # multiple output # beacuse of intermediate prediction
                     for o in output:
@@ -400,7 +443,6 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                     output = output[-1]
                 else:  # single output
                     pass
-                    # loss = criterion(out)
                 temp_iou = intersectionOverUnion(output.cpu(), target_now.cpu(), idx) # have not tested
                 iou_list.append(temp_iou)
 
@@ -548,9 +590,9 @@ if __name__ == '__main__':
     # 2 GPU setting
     # parser.add_argument('--train-batch', default=20, type=int, metavar='N', # if andy takes GPU
     #                     help='train batchsize')
-    parser.add_argument('--train-batch', default=8, type=int, metavar='N',
+    parser.add_argument('--train-batch', default=6, type=int, metavar='N',
                         help='train batchsize')
-    parser.add_argument('--test-batch', default=8, type=int, metavar='N',
+    parser.add_argument('--test-batch', default=6, type=int, metavar='N',
                         help='test batchsize')
 
     # parser.add_argument('--train-batch', default=1, type=int, metavar='N',

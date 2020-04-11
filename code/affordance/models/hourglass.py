@@ -181,9 +181,40 @@ class HourglassNet(nn.Module):
                 self.relu,
             )
 
-    def forward(self, x, last_pred_mask = None):
+    # def TSM_shift(x, n_segment, fold_div=3, inplace=False):
+    #     nt, c, h, w = x.size()
+    #     n_batch = nt // n_segment
+    #     x = x.view(n_batch, n_segment, c, h, w)
+
+    #     fold = c // fold_div
+    #     if inplace:
+    #         # Due to some out of order error when performing parallel computing. 
+    #         # May need to write a CUDA kernel.
+    #         raise NotImplementedError  
+    #         # out = InplaceShift.apply(x, fold)
+    #     else:
+    #         out = torch.zeros_like(x)
+    #         out[:, :-1, :fold] = x[:, 1:, :fold]  # shift left
+    #         out[:, 1:, fold: 2 * fold] = x[:, :-1, fold: 2 * fold]  # shift right
+    #         out[:, :, 2 * fold:] = x[:, :, 2 * fold:]  # not shift
+
+    #     return out.view(nt, c, h, w)
+
+
+    '''
+    new_tsm_feature [batch_size, 2, 256, 64, 64]
+    1 : first stack 
+    2 : second stack (50 % + 50 %)
+    '''
+    def forward(self, x, tsm_flag = None, new_tsm_feature = None):      
+        if tsm_flag:
+            tsm_0_feature = new_tsm_feature[:, 0]
+            tsm_1_feature = new_tsm_feature[:, 1]
+
+
         out = []
-        out_test = []
+        out_test = [] # semantic
+        out_tsm_feature = []
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -191,19 +222,24 @@ class HourglassNet(nn.Module):
         x = self.layer1(x)
         x = self.maxpool(x)
         x = self.layer2(x) # layer before stacked hourgasss model
-        x = self.layer3(x) # layer before stacked hourgasss model # [256, 64, 64]
+        x = self.layer3(x) # layer before stacked hourgasss model # [B, 256, 64, 64]
         
         for i in range(self.num_stacks):
-            y = self.hg[i](x)
+            if not tsm_flag :
+                out_tsm_feature.append(x)
+            else :
+                if i == 0 :
+                    x = tsm_0_feature
+                elif i == 1 :
+                    x = x * 0.5 + tsm_1_feature * 0.5
+                else :
+                    pass
+            y = self.hg[i](x) # x will be residual data in last line # [B, 256, 64, 64]
+            ## insert TSM model
             y = self.dropout_layer(y)
             y = self.res[i](y)
             y = self.fc[i](y) # 256 x 64 x 64
-
-            # add last pred mask at first stack
-            if i == 0:
-                y = self.last_mask_layer(torch.cat((y, last_pred_mask), 1))
-            else :
-                y = self.dropout_layer(y)
+            y = self.dropout_layer(y)
 
             score = self.score[i](y) # blue block in hourglass paper
             ## 2020.3.1 for IoU loss
@@ -214,7 +250,7 @@ class HourglassNet(nn.Module):
                 score_ = self.score_[i](score) # logits feature project back
                 x = x + fc_ + score_ # identity + fc_  + score_ 
 
-        return out
+        return out, out_tsm_feature
         
         # semantic
         # return out, out_test

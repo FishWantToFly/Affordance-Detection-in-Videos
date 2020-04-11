@@ -68,7 +68,8 @@ def resize(img, owidth, oheight):  # CxHxW -> HxWxC
 
     img = np.asarray(img, dtype = np.uint8)
 
-    # print('%f %f' % (img.min(), img.max()))
+    ## Future work
+    ## Use F.interpolate to replace
     img = np.array(Image.fromarray(img).resize((owidth, oheight)))
 
     if img.ndim == 2:
