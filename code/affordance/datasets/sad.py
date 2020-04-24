@@ -37,17 +37,20 @@ class Sad(data.Dataset):
 
         if kwargs['relabel']: # for relabel / visualization
             self.train_list = self.load_full_file_list('test_list_10_v3') # dummy
-            self.valid_list = self.load_full_file_list('original_data_list_v3') # test on original data is enough
-        elif kwargs['test'] == False:
-            self.train_list = self.load_full_file_list('train_list_v3')
-            self.valid_list = self.load_full_file_list('test_list_v3')
-        else :
-            self.train_list = self.load_full_file_list('train_list_10_v3')
-            self.valid_list = self.load_full_file_list('test_list_10_v3')
+            # self.valid_list = self.load_full_file_list('original_data_list_v5') # test on original data is enough
+            # self.valid_list = self.load_full_file_list('test_list_v5_chair')
+            self.valid_list = self.load_full_file_list('test_list_v5')
 
-        # # for multi-object
-        # self.train_list = self.load_full_file_list('train_list_10')
-        # self.valid_list = self.load_full_file_list('data_lab_ito')
+        elif kwargs['test'] == True:
+            self.train_list = self.load_full_file_list('train_list_10_v5')
+            self.valid_list = self.load_full_file_list('test_list_10_v5')
+        else :
+            self.train_list = self.load_full_file_list('train_list_v5')
+            self.valid_list = self.load_full_file_list('test_list_v5')
+            # self.valid_list = self.load_full_file_list('test_list_v5_chair')
+            print("Train set number : %d" % len(self.train_list))
+            print("Test set number : %d" % len(self.valid_list))
+
 
     def load_full_file_list(self, data_list):
         all_files = []
@@ -70,45 +73,34 @@ class Sad(data.Dataset):
             # each time there are 6 feames, overlap = 2 frames
             sorted_action_rgb_frames = sorted(action_rgb_frames)
             start_frame = -4 # -> 0
-            end_frame = -1 # -> 3
             
-            
-            while (end_frame < len(sorted_action_rgb_frames)) :
+            while (True) :
                 start_frame += 4
-                end_frame += 4
-                if (end_frame + 6) >= len(action_rgb_frames) - 1:
-                    end_frame = len(action_rgb_frames) - 1
-                    start_frame = end_frame - 6
+                if (start_frame + 6) >= len(action_rgb_frames):
+                    start_frame = (len(action_rgb_frames)) - 6
 
-                temp = []
+                temp = [] 
                 for i in range(6):
+                    _index = start_frame + i
                     frame = sorted_action_rgb_frames[start_frame + i] 
                     frame_name = os.path.basename(frame)
                     frame_dir_dir = os.path.dirname(os.path.dirname(frame))
                     mask = os.path.join(frame_dir_dir, mask_dir_name, frame_name[:-4] + '.jpg')
                     depth = os.path.join(frame_dir_dir, depth_dir_name, frame_name[:-4] + '.npy')
-                    temp.append([frame, mask, depth])
+                    temp.append([frame, mask, depth, _index])
+                all_files.append(temp)
 
                 # reach the end
-                if end_frame == len(action_rgb_frames) - 1:
-                    all_files.append(temp)
+                if (start_frame + 6) == len(action_rgb_frames):
                     break
-
-            # for frame in sorted(action_rgb_frames) :
-            #     frame_name = os.path.basename(frame)
-            #     frame_dir_dir = os.path.dirname(os.path.dirname(frame))
-            #     mask = os.path.join(frame_dir_dir, mask_dir_name, frame_name[:-4] + '.jpg')
-            #     depth = os.path.join(frame_dir_dir, depth_dir_name, frame_name[:-4] + '.npy')
-            #     all_files.append([frame, mask, depth])
-            #     # print(frame)
-            #     # print(mask)
-            #     # print()
         return all_files
 
 
     
     def __getitem__(self, index):
         video_len = 6
+        mask_path_list = []
+        image_index_list = []
 
         # img_path, mask_path, depth_path = self.train_list[index]
         if self.is_train:
@@ -120,20 +112,28 @@ class Sad(data.Dataset):
         video_input_depth = torch.zeros(video_len, 1, self.inp_res, self.inp_res)
         video_target = torch.zeros(video_len, 1, self.out_res, self.out_res)
 
-        for j in range(video_len):
-            img_path, mask_path, depth_path = video_data[j]
+        # 2020.4.11 produce occlusoin map in advance (same occlusion for one action)
+        random.seed()
+        prob_keep_image = random.random()
+        KEEP_IMAGE = prob_keep_image > 0.8
+
+        G, S, S_num = self.inp_res, 32, int (self.inp_res / 32) # S_num = G / S
+        occlusion_map = torch.zeros(G, G) # 1 represents save image, 0 represents occluded
+        if KEEP_IMAGE == False :
+            for i in range(S_num):
+                for j in range(S_num):
+                    prob_keep_patch = random.random()
+                    if prob_keep_patch > 0.25 :
+                        occlusion_map[i][j] = 1
+
+        for i in range(video_len):
+            img_path, mask_path, depth_path, _index = video_data[i]
 
             # load image and mask
             img = load_image(img_path)  # CxHxW
             a = load_mask(mask_path)    # 1xHxW
             depth = load_depth(depth_path)
             
-            # pts = torch.Tensor(a['joint_self']) # [16, 3]
-            # pts[:, 0:2] -= 1  # Convert pts to zero based
-
-            # c = torch.Tensor(a['objpos']) # [2]
-            # s = a['scale_provided'] # The scale keeps the height of the person as about 200 px.
-
             nparts = 1 # should change if target is more than 2
 
             # Prepare image and groundtruth map
@@ -141,23 +141,27 @@ class Sad(data.Dataset):
             inp = resize(img, self.inp_res, self.inp_res) # get normalized rgb value
             input_depth = resize(depth, self.inp_res, self.inp_res)
 
-
             # Generate ground truth
-            # tpts = a.clone() # target points [16, 3]
             target = torch.zeros(nparts, self.out_res, self.out_res) # [1, out_res, out_res]
-            # target_weight = torch.ones(1, 1) # [nparts, 1]
+            _target = a[0] # HxW
+            # Do data augmentation (Stochastic Cutout occlusions)
+            if self.is_train == True and KEEP_IMAGE == False :
+                for x in range(S_num):
+                    for y in range(S_num):
+                        if occlusion_map[x][y] == 0 :
+                            inp[:, x*S : x*S + S, y*S : y*S + S] = 0
+                            input_depth[x*S : x*S + S, y*S : y*S + S] = 0
+                            _target[x*S : x*S + S, y*S : y*S + S] = 0
 
-            for i in range(nparts):
-                target[i] = resize(a[i], self.out_res, self.out_res)
-
-            video_input[j] = inp
-            video_input_depth[j] = input_depth
-            video_target[j] = target
-
+            target[0] = resize(_target, self.out_res, self.out_res)
+            video_input[i] = inp
+            video_input_depth[i] = input_depth
+            video_target[i] = target
+            mask_path_list.append(mask_path)
+            image_index_list.append(_index)
 
         # Meta info
-        # meta = {'index' : index, 'pts' : pts, 'tpts' : tpts, 'target_weight': target_weight}
-        meta = {'index': index, 'mask_path': mask_path}
+        meta = {'index': index, 'mask_path_list': mask_path_list, 'image_index_list' : image_index_list}
         
         return video_input, video_input_depth, video_target, meta
 

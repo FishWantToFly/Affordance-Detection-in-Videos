@@ -1,4 +1,7 @@
 '''
+Try to use bce loss to have some magic effect
+
+
 # training 
 python main.py
 # training using only 10 actions (for test)
@@ -15,7 +18,7 @@ python main.py --resume ./checkpoint/checkpoint_20.pth.tar -e -d
 python main.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
 
 # temp
-python main_0329_video.py --resume ./checkpoint_0414_occlusion/checkpoint_best_iou.pth.tar -e -r
+python main_0414_bce.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e
 '''
 from __future__ import print_function, absolute_import
 
@@ -75,21 +78,30 @@ def draw_line_chart(args, log_read_dir):
             # in alternative, if you need to use the file content as numbers
             # inner_list = [int(elt.strip()) for elt in line.split(',')]
             list_of_lists.append(inner_list)
-    epoch_idx_list, train_acc_list, val_acc_list = [], [], []
-    train_loss_list, val_loss_list = [], []
+    epoch_idx_list = []
+    train_mask_loss_list, train_bce_loss_list, val_mask_loss_list, val_bce_loss_list = [], [], [], []
     val_iou_list = []
     list_len = len(list_of_lists)
     for i in range(1, list_len):
         epoch_idx_list.append(i)
-        train_loss_list.append(float(list_of_lists[i][2]))
-        val_loss_list.append(float(list_of_lists[i][3]))
-        val_iou_list.append(float(list_of_lists[i][4]))
+        train_mask_loss_list.append(float(list_of_lists[i][1]))
+        train_bce_loss_list.append(float(list_of_lists[i][2]))
+        val_mask_loss_list.append(float(list_of_lists[i][3]))
+        val_bce_loss_list.append(float(list_of_lists[i][4]))
+        val_iou_list.append(float(list_of_lists[i][5]))
 
     plt.xlabel('Epoch')
-    plt.plot(epoch_idx_list, train_loss_list)
-    plt.plot(epoch_idx_list, val_loss_list)
-    plt.legend(['Train loss', 'Val loss'], loc='upper left')
-    plt.savefig(os.path.join(args.checkpoint, 'log_loss.png'))
+    plt.plot(epoch_idx_list, train_mask_loss_list)
+    plt.plot(epoch_idx_list, val_mask_loss_list)
+    plt.legend(['Train mask loss', 'Val mask loss'], loc='upper left')
+    plt.savefig(os.path.join(args.checkpoint, 'log_mask_loss.png'))
+    plt.cla()
+
+    plt.xlabel('Epoch')
+    plt.plot(epoch_idx_list, train_bce_loss_list)
+    plt.plot(epoch_idx_list, val_bce_loss_list)
+    plt.legend(['Train bce loss', 'Val bce loss'], loc='upper left')
+    plt.savefig(os.path.join(args.checkpoint, 'log_bce_loss.png'))
     plt.cla()
 
     plt.xlabel('Epoch')
@@ -150,6 +162,8 @@ def main(args):
 
     # define loss function (criterion) and optimizer
     criterion = losses.IoULoss().to(device)
+    criterion_bce = losses.BCELoss().to(device)
+    criterions = [criterion, criterion_bce]
 
     if args.solver == 'rms':
         optimizer = torch.optim.RMSprop(model.parameters(),
@@ -182,7 +196,7 @@ def main(args):
             print("=> no checkpoint found at '{}'".format(args.resume))
     else:
         logger = Logger(join(args.checkpoint, 'log.txt'), title=title)
-        logger.set_names(['Epoch', 'LR', 'Train Loss', 'Val Loss', 'Val IoU'])
+        logger.set_names(['Epoch', 'TrainMaskLoss', 'TrainBCELoss', 'ValMaskLoss', 'ValBCELoss', 'Val IoU'])
 
     print('    Total params: %.2fM'
           % (sum(p.numel() for p in model.parameters())/1000000.0))
@@ -218,9 +232,8 @@ def main(args):
         RELABEL = True
         if args.evaluate:
             print('\nRelabel val label')
-            loss, iou, predictions = validate(val_loader, model, criterion, njoints,
-                                    args.checkpoint, args.debug, args.flip)
-            print("Val IoU: %.3f" % (iou))
+            val_mask_loss, val_bce_loss, valid_iou = validate(val_loader, model, criterions,
+                                                  njoints, args.checkpoint, args.debug, args.flip)
             return 
 
     # evaluation only
@@ -231,7 +244,7 @@ def main(args):
         if args.debug :
             print('Draw pred /gt heatmap')
         JUST_EVALUATE = True
-        loss, iou, predictions = validate(val_loader, model, criterion, njoints,
+        loss, iou, predictions = validate(val_loader, model, criterions, njoints,
                                            args.checkpoint, args.debug, args.flip)
         print("Val IoU: %.3f" % (iou))
         return
@@ -241,7 +254,7 @@ def main(args):
     mkdir_p(os.path.join(args.checkpoint, code_backup_dir))
     os.system('cp ../affordance/models/hourglass.py %s/%s/hourglass.py' % (args.checkpoint, code_backup_dir))
     os.system('cp ../affordance/datasets/sad.py %s/%s/sad.py' % (args.checkpoint, code_backup_dir))
-    os.system('cp ./main_0329_video.py %s/%s/main_0329_video.py' % (args.checkpoint, code_backup_dir))
+    os.system('cp ./main_0414_bce.py %s/%s/main_0414_bce.py' % (args.checkpoint, code_backup_dir))
 
     # train and eval
     lr = args.lr
@@ -259,16 +272,16 @@ def main(args):
             val_loader.dataset.sigma *=  args.sigma_decay
 
         # train for one epoch
-        train_loss = train(train_loader, model, criterion, optimizer,
+        train_mask_loss, train_bce_loss = train(train_loader, model, criterions, optimizer,
                                       args.debug, args.flip)
 
         # evaluate on validation set
-        valid_loss, valid_iou, predictions = validate(val_loader, model, criterion,
+        val_mask_loss, val_bce_loss, valid_iou = validate(val_loader, model, criterions,
                                                   njoints, args.checkpoint, args.debug, args.flip)
         print("Val IoU: %.3f" % (valid_iou))
 
         # append logger file
-        logger.append([epoch + 1, lr, train_loss, valid_loss, valid_iou])
+        logger.append([epoch + 1, train_mask_loss, train_bce_loss, val_mask_loss, val_bce_loss, valid_iou])
 
         # remember best acc and save checkpoint
         is_best_iou = valid_iou > best_iou
@@ -286,11 +299,14 @@ def main(args):
     print("Best iou = %.3f" % (best_iou))
     draw_line_chart(args, os.path.join(args.checkpoint, 'log.txt'))
 
-def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
+def train(train_loader, model, criterions, optimizer, debug=False, flip=True):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
+    losses_mask = AverageMeter()
+    losses_bce = AverageMeter()
 
+    criterion, criterion_bce = criterions
     # switch to train mode
     model.train()
 
@@ -307,6 +323,8 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
 
         batch_size = input.shape[0]
         loss = 0
+        loss_mask = 0
+        loss_bce = 0
         # store first two stack feature # 2 = first and second stack, 6 = video length
         video_feature_cache = torch.zeros(batch_size, 6, 2, 256, 64, 64)
         
@@ -343,7 +361,9 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
 
             if type(output) == list:  # multiple output # beacuse of intermediate prediction
                 for o in output:
-                    loss += criterion(o, target_now)
+                    loss_mask += criterion(o, target_now)
+                    loss_bce += criterion_bce(o, target_now)
+                loss += loss_mask + loss_bce
                 output = output[-1]
             else:  # single output
                 pass
@@ -351,6 +371,8 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
         
         # # measure accuracy and record loss
         losses.update(loss.item(), input.size(0))
+        losses_mask.update(loss_mask.item(), input.size(0))
+        losses_bce.update(loss_bce.item(), input.size(0))
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -373,18 +395,21 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
                     )
         bar.next()
     bar.finish()
-    return losses.avg
+    return losses_mask.avg, losses_bce.avg
 
 
-def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False, flip=True):
+def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False, flip=True):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
+    losses_mask = AverageMeter()
+    losses_bce = AverageMeter()
     ioues = AverageMeter()
 
     # predictions
     predictions = torch.Tensor(val_loader.dataset.__len__(), num_classes, 2)
 
+    criterion, criterion_bce = criterions
     # switch to evaluate mode
     model.eval()
 
@@ -406,6 +431,8 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             
             batch_size = input.shape[0]
             loss = 0
+            loss_mask = 0
+            loss_bce = 0
             iou_list = []
 
             # store first two stack feature # 2 = first and second stack, 6 = video length
@@ -443,7 +470,9 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
 
                 if type(output) == list:  # multiple output # beacuse of intermediate prediction
                     for o in output:
-                        loss += criterion(o, target_now)
+                        loss_mask += criterion(o, target_now)
+                        loss_bce += criterion_bce(o, target_now)
+                    loss += loss_mask + loss_bce
                     output = output[-1]
                 else:  # single output
                     pass
@@ -521,7 +550,8 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
 
             # measure accuracy and record loss
             losses.update(loss.item(), input.size(0))
-            # acces.update(acc[0], input.size(0))
+            losses_mask.update(loss_mask.item(), input.size(0))
+            losses_bce.update(loss_bce.item(), input.size(0))         
             ioues.update(sum(iou_list) / len(iou_list), input.size(0))
 
             # measure elapsed time
@@ -540,7 +570,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                         )
             bar.next()
         bar.finish()
-    return losses.avg, ioues.avg, predictions
+    return losses_mask.avg, losses_bce.avg, ioues.avg
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
@@ -601,9 +631,9 @@ if __name__ == '__main__':
                         # help='train batchsize')
     # parser.add_argument('--test-batch', default=4, type=int, metavar='N', # if andy takes GPU
                         # help='train batchsize')
-    parser.add_argument('--train-batch', default=8, type=int, metavar='N',
+    parser.add_argument('--train-batch', default=6, type=int, metavar='N',
                         help='train batchsize')
-    parser.add_argument('--test-batch', default=8, type=int, metavar='N',
+    parser.add_argument('--test-batch', default=6, type=int, metavar='N',
                         help='test batchsize')
 
     # parser.add_argument('--train-batch', default=1, type=int, metavar='N',

@@ -1,4 +1,9 @@
 '''
+coy from main_0413_input_1298.py
+i.e. input resolution now is 128x128
+lr : 5e-4 -> 5e-5
+
+
 # training 
 python main.py
 # training using only 10 actions (for test)
@@ -15,7 +20,9 @@ python main.py --resume ./checkpoint/checkpoint_20.pth.tar -e -d
 python main.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
 
 # temp
-python main_0329_video.py --resume ./checkpoint_0414_occlusion/checkpoint_best_iou.pth.tar -e -r
+python main_0413_input_128.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -w
+
+python main_0413_input_128.py --resume ./checkpoint_0414_input_128/checkpoint_best_iou.pth.tar -e -r
 '''
 from __future__ import print_function, absolute_import
 
@@ -23,6 +30,7 @@ import os
 import argparse
 import time
 import matplotlib.pyplot as plt
+import random
 
 import torch
 import torch.nn.parallel
@@ -241,7 +249,8 @@ def main(args):
     mkdir_p(os.path.join(args.checkpoint, code_backup_dir))
     os.system('cp ../affordance/models/hourglass.py %s/%s/hourglass.py' % (args.checkpoint, code_backup_dir))
     os.system('cp ../affordance/datasets/sad.py %s/%s/sad.py' % (args.checkpoint, code_backup_dir))
-    os.system('cp ./main_0329_video.py %s/%s/main_0329_video.py' % (args.checkpoint, code_backup_dir))
+    this_file_name = os.path.split(os.path.abspath(__file__))[1]
+    os.system('cp ./%s %s' % (this_file_name, os.path.join(args.checkpoint, code_backup_dir, this_file_name)))
 
     # train and eval
     lr = args.lr
@@ -299,6 +308,7 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
     gt_win, pred_win = None, None
     bar = Bar('Train', max=len(train_loader))
     for i, (input, input_depth, target, meta) in enumerate(train_loader):
+
         # measure data loading time
         data_time.update(time.time() - end)
 
@@ -308,7 +318,7 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
         batch_size = input.shape[0]
         loss = 0
         # store first two stack feature # 2 = first and second stack, 6 = video length
-        video_feature_cache = torch.zeros(batch_size, 6, 2, 256, 64, 64)
+        video_feature_cache = torch.zeros(batch_size, 6, 2, 256, 32, 32)
         
         with torch.no_grad():
             # first compute
@@ -324,10 +334,10 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
             b, t, _, c, h, w = video_feature_cache.size()
             fold_div = 8
             fold = c // fold_div
-            new_tsm_feature = torch.zeros(batch_size, 6, 2, 256, 64, 64)
+            new_tsm_feature = torch.zeros(batch_size, 6, 2, 256, 32, 32)
             for j in range(2):
                 x = video_feature_cache[:, :, j]
-                temp = torch.zeros(batch_size, 6, 256, 64, 64)
+                temp = torch.zeros(batch_size, 6, 256, 32, 32)
                 temp[:, :-1, :fold] = x[:, 1:, :fold]  # shift left
                 temp[:, 1:, fold: 2 * fold] = x[:, :-1, fold: 2 * fold]  # shift right
                 temp[:, :, 2 * fold:] = x[:, :, 2 * fold:]  # not shift
@@ -409,7 +419,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             iou_list = []
 
             # store first two stack feature # 2 = first and second stack, 6 = video length
-            video_feature_cache = torch.zeros(batch_size, 6, 2, 256, 64, 64)
+            video_feature_cache = torch.zeros(batch_size, 6, 2, 256, 32, 32)
 
             # first compute
             for j in range(6):
@@ -424,10 +434,10 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             b, t, _, c, h, w = video_feature_cache.size()
             fold_div = 8
             fold = c // fold_div
-            new_tsm_feature = torch.zeros(batch_size, 6, 2, 256, 64, 64)
+            new_tsm_feature = torch.zeros(batch_size, 6, 2, 256, 32, 32)
             for j in range(2):
                 x = video_feature_cache[:, :, j]
-                temp = torch.zeros(batch_size, 6, 256, 64, 64)
+                temp = torch.zeros(batch_size, 6, 256, 32, 32)
                 temp[:, :-1, :fold] = x[:, 1:, :fold]  # shift left
                 temp[:, 1:, fold: 2 * fold] = x[:, :-1, fold: 2 * fold]  # shift right
                 temp[:, :, 2 * fold:] = x[:, :, 2 * fold:]  # not shift
@@ -562,9 +572,9 @@ if __name__ == '__main__':
     parser.add_argument('--year', default=2014, type=int, metavar='N',
                         help='year of coco dataset: 2014 (default) | 2017)')
 
-    parser.add_argument('--inp-res', default=256, type=int,
+    parser.add_argument('--inp-res', default=128, type=int,
                         help='input resolution (default: 256)')
-    parser.add_argument('--out-res', default=64, type=int,
+    parser.add_argument('--out-res', default=32, type=int,
                     help='output resolution (default: 64, to gen GT)')
                     
     parser.add_argument('--dataset-list-dir-path', default='/home/s5078345/Affordance-Detection-on-Video/dataset/data_list', type=str,
@@ -601,9 +611,9 @@ if __name__ == '__main__':
                         # help='train batchsize')
     # parser.add_argument('--test-batch', default=4, type=int, metavar='N', # if andy takes GPU
                         # help='train batchsize')
-    parser.add_argument('--train-batch', default=8, type=int, metavar='N',
+    parser.add_argument('--train-batch', default=20, type=int, metavar='N',
                         help='train batchsize')
-    parser.add_argument('--test-batch', default=8, type=int, metavar='N',
+    parser.add_argument('--test-batch', default=20, type=int, metavar='N',
                         help='test batchsize')
 
     # parser.add_argument('--train-batch', default=1, type=int, metavar='N',
@@ -611,7 +621,7 @@ if __name__ == '__main__':
     # parser.add_argument('--test-batch', default=1, type=int, metavar='N', # for debug
     #                     help='test batchsize')
 
-    parser.add_argument('--lr', '--learning-rate', default=5e-4, type=float,
+    parser.add_argument('--lr', '--learning-rate', default=5e-5, type=float,
                         metavar='LR', help='initial learning rate')
     parser.add_argument('--momentum', default=0, type=float, metavar='M',
                         help='momentum')

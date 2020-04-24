@@ -10,3 +10,7 @@
     Add depth input
 - checkpoint_0308_semantic
     Add semantic branch. Perform worse than checkpoint_0307_depth by IoU 5.
+- checkpoint_0405_TSM
+    Train like video use TSM module
+- vcheckpoint_0412_occlusion
+    Use tochastic Hide-and-Seek occlusions

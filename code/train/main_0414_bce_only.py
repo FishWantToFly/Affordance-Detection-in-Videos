@@ -15,7 +15,7 @@ python main.py --resume ./checkpoint/checkpoint_20.pth.tar -e -d
 python main.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
 
 # temp
-python main_0329_video.py --resume ./checkpoint_0414_occlusion/checkpoint_best_iou.pth.tar -e -r
+python main_0414_bce_only.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -w
 '''
 from __future__ import print_function, absolute_import
 
@@ -149,7 +149,8 @@ def main(args):
     model = torch.nn.DataParallel(model).to(device)
 
     # define loss function (criterion) and optimizer
-    criterion = losses.IoULoss().to(device)
+    # criterion = losses.IoULoss().to(device)
+    criterion = losses.BCELoss().to(device)
 
     if args.solver == 'rms':
         optimizer = torch.optim.RMSprop(model.parameters(),
@@ -220,7 +221,6 @@ def main(args):
             print('\nRelabel val label')
             loss, iou, predictions = validate(val_loader, model, criterion, njoints,
                                     args.checkpoint, args.debug, args.flip)
-            print("Val IoU: %.3f" % (iou))
             return 
 
     # evaluation only
@@ -241,7 +241,7 @@ def main(args):
     mkdir_p(os.path.join(args.checkpoint, code_backup_dir))
     os.system('cp ../affordance/models/hourglass.py %s/%s/hourglass.py' % (args.checkpoint, code_backup_dir))
     os.system('cp ../affordance/datasets/sad.py %s/%s/sad.py' % (args.checkpoint, code_backup_dir))
-    os.system('cp ./main_0329_video.py %s/%s/main_0329_video.py' % (args.checkpoint, code_backup_dir))
+    os.system('cp ./main_0414_bce_only.py %s/%s/main_0414_bce_only.py' % (args.checkpoint, code_backup_dir))
 
     # train and eval
     lr = args.lr
@@ -601,9 +601,9 @@ if __name__ == '__main__':
                         # help='train batchsize')
     # parser.add_argument('--test-batch', default=4, type=int, metavar='N', # if andy takes GPU
                         # help='train batchsize')
-    parser.add_argument('--train-batch', default=8, type=int, metavar='N',
+    parser.add_argument('--train-batch', default=6, type=int, metavar='N',
                         help='train batchsize')
-    parser.add_argument('--test-batch', default=8, type=int, metavar='N',
+    parser.add_argument('--test-batch', default=6, type=int, metavar='N',
                         help='test batchsize')
 
     # parser.add_argument('--train-batch', default=1, type=int, metavar='N',

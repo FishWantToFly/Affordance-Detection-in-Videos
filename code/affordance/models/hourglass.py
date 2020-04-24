@@ -147,7 +147,7 @@ class HourglassNet(nn.Module):
 
         ### prev mask
         self.last_mask_layer = nn.Conv2d(ch + 1, ch, kernel_size=1, bias=True)
-        self.dropout_layer = nn.Dropout(p=0.75)
+        # self.dropout_layer = nn.Dropout(p=0.75) # if have bn, these is no need of dropout
 
     def _make_residual(self, block, planes, blocks, stride=1):
         '''
@@ -181,29 +181,9 @@ class HourglassNet(nn.Module):
                 self.relu,
             )
 
-    # def TSM_shift(x, n_segment, fold_div=3, inplace=False):
-    #     nt, c, h, w = x.size()
-    #     n_batch = nt // n_segment
-    #     x = x.view(n_batch, n_segment, c, h, w)
-
-    #     fold = c // fold_div
-    #     if inplace:
-    #         # Due to some out of order error when performing parallel computing. 
-    #         # May need to write a CUDA kernel.
-    #         raise NotImplementedError  
-    #         # out = InplaceShift.apply(x, fold)
-    #     else:
-    #         out = torch.zeros_like(x)
-    #         out[:, :-1, :fold] = x[:, 1:, :fold]  # shift left
-    #         out[:, 1:, fold: 2 * fold] = x[:, :-1, fold: 2 * fold]  # shift right
-    #         out[:, :, 2 * fold:] = x[:, :, 2 * fold:]  # not shift
-
-    #     return out.view(nt, c, h, w)
-
-
     '''
     new_tsm_feature [batch_size, 2, 256, 64, 64]
-    1 : first stack 
+    1 : first stack (50 % + 50 %)
     2 : second stack (50 % + 50 %)
     '''
     def forward(self, x, tsm_flag = None, new_tsm_feature = None):      
@@ -229,17 +209,14 @@ class HourglassNet(nn.Module):
                 out_tsm_feature.append(x)
             else :
                 if i == 0 :
-                    x = tsm_0_feature
+                    x = x * 0.5 + tsm_0_feature * 0.5
                 elif i == 1 :
                     x = x * 0.5 + tsm_1_feature * 0.5
                 else :
-                    pass
+                    pass # x = x
             y = self.hg[i](x) # x will be residual data in last line # [B, 256, 64, 64]
-            ## insert TSM model
-            y = self.dropout_layer(y)
             y = self.res[i](y)
             y = self.fc[i](y) # 256 x 64 x 64
-            y = self.dropout_layer(y)
 
             score = self.score[i](y) # blue block in hourglass paper
             ## 2020.3.1 for IoU loss
