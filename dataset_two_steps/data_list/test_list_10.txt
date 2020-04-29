@@ -1,0 +1,10 @@
+./dataset_original/home_living_room/chair_2_angle_2/people_stand_up_from_it
+./dataset_original/home_living_room/chair_2_angle_2/put_object_on_it_1
+./dataset_original/home_living_room/chair_2_angle_2/put_object_on_it_2
+./dataset_original/home_living_room/chair_2_angle_2/put_big_object_on_it
+./dataset_original/home_living_room/chair_2_angle_2/remove_object_on_it_2
+./dataset_original/home_living_room/chair_2_angle_2/people_sit_on_it
+./dataset_original/home_living_room/chair_2_angle_2/move_object_itself_4
+./dataset_original/home_living_room/chair_2_angle_2/put_object_on_it_3
+./dataset_original/home_living_room/chair_2_angle_2/move_object_itself_2
+./dataset_original/home_living_room/chair_2_angle_2/remove_object_on_it_1

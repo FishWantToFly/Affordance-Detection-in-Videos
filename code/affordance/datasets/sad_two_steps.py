@@ -1,5 +1,6 @@
 '''
-Support affordance dataset (sad)
+2020.4.28 two steps 
+1. affordance segmentation (first_mask)
 '''
 
 from __future__ import print_function, absolute_import
@@ -19,16 +20,14 @@ from affordance.utils.imutils import *
 from affordance.utils.transforms import *
 
 
-class Sad(data.Dataset):
+class Sad_two_steps(data.Dataset):
     def __init__(self, is_train = True, **kwargs):
         self.img_folder = kwargs['image_path'] # root image folders
-        # self.jsonf:ile   = kwargs['anno_path']
         self.is_train   = is_train # training set or test set
         self.inp_res    = kwargs['inp_res']
         self.out_res    = kwargs['out_res']
         self.sigma      = kwargs['sigma']
         self.dataset_list_dir_path = kwargs['dataset_list_dir_path']
-
 
         self.semantic_dict = {'basket': 0, 'chair': 1, 'plate': 2, 'sofa': 3, 'table': 4}
         self.semantic_len = len(self.semantic_dict)
@@ -36,18 +35,15 @@ class Sad(data.Dataset):
         # contain img and annotation
 
         if kwargs['relabel']: # for relabel / visualization
-            self.train_list = self.load_full_file_list('test_list_10_v3') # dummy
-            # self.valid_list = self.load_full_file_list('original_data_list_v5') # test on original data is enough
-            # self.valid_list = self.load_full_file_list('test_list_v5_chair')
-            self.valid_list = self.load_full_file_list('test_list_v5')
+            self.train_list = self.load_full_file_list('test_list') # dummy
+            self.valid_list = self.load_full_file_list('original_data_list')
 
         elif kwargs['test'] == True:
-            self.train_list = self.load_full_file_list('train_list_10_v5')
-            self.valid_list = self.load_full_file_list('test_list_10_v5')
+            self.train_list = self.load_full_file_list('train_list_10')
+            self.valid_list = self.load_full_file_list('test_list_10')
         else :
-            self.train_list = self.load_full_file_list('train_list_v5')
-            self.valid_list = self.load_full_file_list('test_list_v5')
-            # self.valid_list = self.load_full_file_list('test_list_v5_chair')
+            self.train_list = self.load_full_file_list('train_list')
+            self.valid_list = self.load_full_file_list('test_list')
             print("Train set number : %d" % len(self.train_list))
             print("Test set number : %d" % len(self.valid_list))
 
@@ -62,7 +58,7 @@ class Sad(data.Dataset):
                 action_list.append(inner_list[0])
 
         image_dir_name = 'raw_frames'
-        mask_dir_name = 'mask'
+        mask_dir_name = 'first_mask' # change !!!!
         depth_dir_name = 'inpaint_depth'
         for action in action_list :
             action_rgb_frames = glob.glob(os.path.join(self.img_folder, action, image_dir_name, '*.png'))
@@ -94,8 +90,6 @@ class Sad(data.Dataset):
                 if (start_frame + 6) == len(action_rgb_frames):
                     break
         return all_files
-
-
     
     def __getitem__(self, index):
         video_len = 6
@@ -112,7 +106,7 @@ class Sad(data.Dataset):
         video_input_depth = torch.zeros(video_len, 1, self.inp_res, self.inp_res)
         video_target = torch.zeros(video_len, 1, self.out_res, self.out_res)
 
-        # 2020.4.11 produce occlusoin map in advance (same occlusion for one action)
+        # Occlusion Preprocess (same occlusion for one action)
         random.seed()
         prob_keep_image = random.random()
         KEEP_IMAGE = prob_keep_image > 0.8
@@ -125,6 +119,13 @@ class Sad(data.Dataset):
                     prob_keep_patch = random.random()
                     if prob_keep_patch > 0.25 :
                         occlusion_map[i][j] = 1
+
+        # Random shift preprocess
+        random_shift_prob = random.random()
+        h_num = int (self.inp_res / 6)
+        height_shift = random.randint(-h_num, h_num)
+        w_num = int (self.inp_res / 6)
+        width_shift = random.randint(-w_num, w_num)
 
         for i in range(video_len):
             img_path, mask_path, depth_path, _index = video_data[i]
@@ -144,17 +145,26 @@ class Sad(data.Dataset):
             # Generate ground truth
             target = torch.zeros(nparts, self.out_res, self.out_res) # [1, out_res, out_res]
             _target = a[0] # HxW
-            _target = resize(_target, self.inp_res, self.inp_res)
-            # Do data augmentation (Stochastic Cutout occlusions)
+            _target = resize(_target, self.inp_res, self.inp_res) # [inp_res, inp_res]
+
+            ######################################################
+            # Data augmentation 
+            # Occlusion (Stochastic Cutout occlusions)
             if self.is_train == True and KEEP_IMAGE == False :
                 for x in range(S_num):
                     for y in range(S_num):
                         if occlusion_map[x][y] == 0 :
                             inp[:, x*S : x*S + S, y*S : y*S + S] = 0
                             input_depth[x*S : x*S + S, y*S : y*S + S] = 0
-                            _target[x*S : x*S + S, y*S : y*S + S] = 0 # 2020.4.28 debug here for resize
+                            _target[x*S : x*S + S, y*S : y*S + S] = 0 
 
-            target[0] = resize(_target, self.out_res, self.out_res)
+            # Random shift
+            if random_shift_prob > 0.5 :
+                inp, _target, input_depth = self.random_shift(inp, _target, input_depth, h_num, w_num)
+
+            ##############################################
+            # Output
+            target[0] = resize(_target, self.out_res, self.out_res) # resize from 256x256 -> 64x64
             video_input[i] = inp
             video_input_depth[i] = input_depth
             video_target[i] = target
@@ -166,13 +176,51 @@ class Sad(data.Dataset):
         
         return video_input, video_input_depth, video_target, meta
 
+    def random_shift(self, img, mask, depth, height_shift, width_shift):
+        IMG_HEIGHT = self.inp_res
+        IMG_WIDTH = self.inp_res
+
+        shift_img = torch.zeros_like(img)
+        shift_mask = torch.zeros_like(mask)
+        shift_depth = torch.zeros_like(depth)
+
+        if height_shift >= 0 and width_shift >= 0:
+            shift_img[:, height_shift:IMG_HEIGHT, width_shift:IMG_WIDTH] = img[:, 0: (IMG_HEIGHT - height_shift), \
+                0: (IMG_WIDTH - width_shift)]
+            shift_mask[:, height_shift:IMG_HEIGHT, width_shift:IMG_WIDTH] = mask[:, 0: (IMG_HEIGHT - height_shift), \
+                0: (IMG_WIDTH - width_shift)]
+            shift_depth[:, height_shift:IMG_HEIGHT, width_shift:IMG_WIDTH] = depth[:, 0: (IMG_HEIGHT - height_shift), \
+                0: (IMG_WIDTH - width_shift)]
+        elif height_shift < 0 and width_shift >= 0:
+            shift_img[:, 0:(IMG_HEIGHT + height_shift), width_shift:IMG_WIDTH] = img[:, -height_shift: IMG_HEIGHT, \
+                0: (IMG_WIDTH - width_shift)]
+            shift_mask[:, 0:(IMG_HEIGHT + height_shift), width_shift:IMG_WIDTH] = mask[:, -height_shift: IMG_HEIGHT, \
+                0: (IMG_WIDTH - width_shift)]
+            shift_depth[:, 0:(IMG_HEIGHT + height_shift), width_shift:IMG_WIDTH] = depth[:, -height_shift: IMG_HEIGHT, \
+                0: (IMG_WIDTH - width_shift)]
+        elif height_shift >= 0 and width_shift < 0:
+            shift_img[:, height_shift:IMG_HEIGHT, 0:(IMG_WIDTH + width_shift)] = img[:, 0: (IMG_HEIGHT - height_shift), \
+                -width_shift: IMG_WIDTH]
+            shift_mask[:, height_shift:IMG_HEIGHT, 0:(IMG_WIDTH + width_shift)] = mask[:, 0: (IMG_HEIGHT - height_shift), \
+                -width_shift: IMG_WIDTH]
+            shift_depth[:, height_shift:IMG_HEIGHT, 0:(IMG_WIDTH + width_shift)] = depth[:, 0: (IMG_HEIGHT - height_shift), \
+                -width_shift: IMG_WIDTH]
+        elif height_shift < 0 and width_shift < 0:
+            shift_img[:, 0:(IMG_HEIGHT + height_shift), 0:(IMG_WIDTH + width_shift)] = img[:, 0: (IMG_HEIGHT + height_shift), \
+                0: (IMG_WIDTH + width_shift)]
+            shift_mask[:, 0:(IMG_HEIGHT + height_shift), 0:(IMG_WIDTH + width_shift)] = mask[:, 0: (IMG_HEIGHT + height_shift), \
+                0: (IMG_WIDTH + width_shift)]
+            shift_depth[:, 0:(IMG_HEIGHT + height_shift), 0:(IMG_WIDTH + width_shift)] = depth[:, 0: (IMG_HEIGHT + height_shift), \
+                0: (IMG_WIDTH + width_shift)]
+        return shift_img, shift_mask, shift_depth
+
     def __len__(self):
         if self.is_train:
             return len(self.train_list)
         else:
             return len(self.valid_list)
 
-def sad(**kwargs):
-    return Sad(**kwargs)
+def sad_two_steps(**kwargs):
+    return Sad_two_steps(**kwargs)
 
-sad.njoints = 1  # ugly but works
+sad_two_steps.njoints = 1  # ugly but works

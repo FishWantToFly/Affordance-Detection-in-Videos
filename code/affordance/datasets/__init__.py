@@ -6,4 +6,5 @@
 
 from .sad import sad
 from .sad_semantic import sad_semantic
-__all__ = ('sad, sad_semantic')
+from .sad_two_steps import sad_two_steps
+__all__ = ('sad, sad_semantic, sad_two_steps')

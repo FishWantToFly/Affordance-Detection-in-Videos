@@ -22,12 +22,14 @@ Issue :
     * Detect single instance
     * Should download dataset down to local for picking which frames need to be labeled fist 
     * !!! Execute 0_domo.py after 1_data_process.py -> mask would be ordered
-    1. source activate siammask
-    2. cd SiamMask
-    3. export PYTHONPATH=$PWD:$PYTHONPATH
-    4. cd $SiamMask/experiments/siammask_sharp
-    5. export PYTHONPATH=$PWD:$PYTHONPATH
-    6. python ../../tools/0_demo.py
+    '''
+    source activate siammask
+    cd SiamMask
+    export PYTHONPATH=$PWD:$PYTHONPATH
+    cd $SiamMask/experiments/siammask_sharp
+    export PYTHONPATH=$PWD:$PYTHONPATH
+    python ../../tools/0_demo.py
+    '''
 
 * 2_depth_inpaint.py
     1. transform to greyscale image (.txt -> .npy -> .png)
