@@ -40,6 +40,7 @@ test_place_object_list = []
 test_place_object_list.append(['tohoku_seminar_room', 'table_2'])
 test_place_object_list.append(['tohoku_seminar_room', 'table_2_angle_2'])
 test_place_object_list.append(['my_room', 'table_1'])
+
 test_place_object_list.append(['lab', 'chair_1'])
 test_place_object_list.append(['lab', 'chair_2'])
 test_place_object_list.append(['home_living_room', 'chair_1'])

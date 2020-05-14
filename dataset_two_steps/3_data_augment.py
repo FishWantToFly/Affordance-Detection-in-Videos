@@ -101,3 +101,19 @@ for action in sorted(glob.glob("./dataset_original/*/*/*")):
 		depth_mirror = depth_mirror.reshape(480, 640, 1)
 		depth_mirror_path = os.path.join(new_depth_path, _depth)
 		np.save(depth_mirror_path, depth_mirror)
+
+	########################
+	# 2020.5.4 generate mask
+	raw_mask_dir = 'mask'
+
+	raw_action_mask_path = os.path.join(action, raw_mask_dir, '*')
+	raw_mask_list = sorted(glob.glob(raw_action_mask_path))
+	raw_new_mask_path = os.path.join(now_dir, copy_dir_name, place, _object, _action, raw_mask_dir)
+	create_dir(raw_new_mask_path)
+	# 4. flip mask and frame, and then copy
+	for mask in raw_mask_list:
+		_, _mask = os.path.split(mask)
+		mask_img = Image.open(mask)
+		img_mirror = ImageOps.mirror(mask_img)
+		img_mirror_path = os.path.join(raw_new_mask_path, _mask)
+		img_mirror.save(img_mirror_path, quality=95)

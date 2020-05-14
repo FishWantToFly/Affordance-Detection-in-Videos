@@ -20,7 +20,7 @@ from affordance.utils.imutils import *
 from affordance.utils.transforms import *
 
 
-class Sad_two_steps(data.Dataset):
+class Sad_step_1(data.Dataset):
     def __init__(self, is_train = True, **kwargs):
         self.img_folder = kwargs['image_path'] # root image folders
         self.is_train   = is_train # training set or test set
@@ -159,8 +159,9 @@ class Sad_two_steps(data.Dataset):
                             _target[x*S : x*S + S, y*S : y*S + S] = 0 
 
             # Random shift
-            if random_shift_prob > 0.5 :
-                inp, _target, input_depth = self.random_shift(inp, _target, input_depth, h_num, w_num)
+            if self.is_train == True :
+                if random_shift_prob > 0.5 :
+                    inp, _target, input_depth = self.random_shift(inp, _target, input_depth, h_num, w_num)
 
             ##############################################
             # Output
@@ -220,7 +221,7 @@ class Sad_two_steps(data.Dataset):
         else:
             return len(self.valid_list)
 
-def sad_two_steps(**kwargs):
-    return Sad_two_steps(**kwargs)
+def sad_step_1(**kwargs):
+    return Sad_step_1(**kwargs)
 
-sad_two_steps.njoints = 1  # ugly but works
+sad_step_1.njoints = 1  # ugly but works
