@@ -1,4 +1,5 @@
 '''
+Useless now.
 Support affordance dataset (sad)
 '''
 

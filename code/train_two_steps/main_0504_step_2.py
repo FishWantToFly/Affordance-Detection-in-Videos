@@ -242,7 +242,7 @@ def main(args):
         JUST_EVALUATE = True
         loss, acc = validate(val_loader, model, criterion, njoints,
                                            args.checkpoint, args.debug, args.flip)
-        print("Val acc: %.3f" % (iou))
+        print("Val acc: %.3f" % (acc))
         return
     
 
@@ -306,12 +306,13 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
 
     gt_win, pred_win = None, None
     bar = Bar('Train', max=len(train_loader))
-    for i, (input, input_mask, target, meta) in enumerate(train_loader):
+    for i, (input, input_depth, input_mask, target, meta) in enumerate(train_loader):
 
         # measure data loading time
         data_time.update(time.time() - end)
 
         input, input_mask, target = input.to(device), input_mask.to(device), target.to(device, non_blocking=True)
+        input_depth = input_depth.to(device)
         # target_weight = meta['target_weight'].to(device, non_blocking=True)
 
         batch_size = input.shape[0]
@@ -320,12 +321,13 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
 
         for j in range(6):
             input_now = input[:, j] # [B, 3, 256, 256]
+            input_depth_now = input_depth[:, j]
             input_mask_now = input_mask[:, j]
             target_now = target[:, j]
             if j == 0:
-                output, last_state = model(torch.cat((input_now, input_mask_now), 1))
+                output, last_state = model(torch.cat((input_now, input_depth_now, input_mask_now), 1))
             else : 
-                output, _ = model(torch.cat((input_now, input_mask_now), 1), input_last_state = last_state)
+                output, _ = model(torch.cat((input_now, input_depth_now, input_mask_now), 1), input_last_state = last_state)
                 # print(output.shape)
             
             loss += criterion(output, target_now)
@@ -372,13 +374,14 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
     end = time.time()
     bar = Bar('Eval ', max=len(val_loader))
     with torch.no_grad():
-        for i, (input, input_mask, target, meta) in enumerate(val_loader):
+        for i, (input, input_depth, input_mask, target, meta) in enumerate(val_loader):
             # if RELABEL and i == 2 : break
 
             # measure data loading time
             data_time.update(time.time() - end)
 
             input, input_mask, target = input.to(device), input_mask.to(device), target.to(device, non_blocking=True)
+            input_depth = input_depth.to(device)
             
             batch_size = input.shape[0]
             loss = 0
@@ -388,12 +391,13 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             # compute use TSM feature
             for j in range(6):
                 input_now = input[:, j] # [B, 3, 256, 256]
+                input_depth_now = input_depth[:, j]
                 input_mask_now = input_mask[:, j]
                 target_now = target[:, j]
                 if j == 0:
-                    output, last_state = model(torch.cat((input_now, input_mask_now), 1))
+                    output, last_state = model(torch.cat((input_now, input_depth_now, input_mask_now), 1))
                 else : 
-                    output, _ = model(torch.cat((input_now, input_mask_now), 1), input_last_state = last_state)
+                    output, _ = model(torch.cat((input_now, input_depth_now, input_mask_now), 1), input_last_state = last_state)
                     # print(output.shape)
 
                 round_output = torch.round(output).float()
@@ -468,17 +472,17 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             batch_time.update(time.time() - end)
             end = time.time()
 
-            # # plot progress
-            # bar.suffix  = '({batch}/{size}) Data: {data:.6f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f}'.format(
-            #             batch=i + 1,
-            #             size=len(val_loader),
-            #             data=data_time.val,
-            #             bt=batch_time.avg,
-            #             total=bar.elapsed_td,
-            #             eta=bar.eta_td,
-            #             loss=losses.avg
-            #             )
-            # bar.next()
+            # plot progress
+            bar.suffix  = '({batch}/{size}) Data: {data:.6f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f}'.format(
+                        batch=i + 1,
+                        size=len(val_loader),
+                        data=data_time.val,
+                        bt=batch_time.avg,
+                        total=bar.elapsed_td,
+                        eta=bar.eta_td,
+                        loss=losses.avg
+                        )
+            bar.next()
         bar.finish()
     return losses.avg, acces.avg
 
@@ -537,23 +541,18 @@ if __name__ == '__main__':
                         help='manual epoch number (useful on restarts)')
 
     # 2 GPU setting
-    parser.add_argument('--train-batch', default=24, type=int, metavar='N',
+    parser.add_argument('--train-batch', default=20, type=int, metavar='N',
                         help='train batchsize')
-    parser.add_argument('--test-batch', default=24, type=int, metavar='N',
+    parser.add_argument('--test-batch', default=20, type=int, metavar='N',
                         help='train batchsize')
-    # parser.add_argument('--train-batch', default=20, type=int, metavar='N', # for input resolution 128x128
-                        # help='train batchsize')
-    # parser.add_argument('--test-batch', default=20, type=int, metavar='N',
-                        # help='test batchsize')
 
-
-    parser.add_argument('--lr', '--learning-rate', default=2e-4, type=float,
+    parser.add_argument('--lr', '--learning-rate', default=5e-5, type=float,
                         metavar='LR', help='initial learning rate')
     parser.add_argument('--momentum', default=0, type=float, metavar='M',
                         help='momentum')
     parser.add_argument('--weight-decay', '--wd', default=0, type=float,
                         metavar='W', help='weight decay (default: 0)')
-    parser.add_argument('--schedule', type=int, nargs='+', default=[50, 80],
+    parser.add_argument('--schedule', type=int, nargs='+', default=[30, 60, 90],
                         help='Decrease learning rate at these epochs.')
     parser.add_argument('--gamma', type=float, default=0.1,
                         help='LR is multiplied by gamma on schedule.')

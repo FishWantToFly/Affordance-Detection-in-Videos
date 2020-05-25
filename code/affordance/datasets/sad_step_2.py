@@ -59,7 +59,9 @@ class Sad_step_2(data.Dataset):
                 action_list.append(inner_list[0])
 
         image_dir_name = 'raw_frames'
-        mask_dir_name = 'mask' # gt_mask_dir
+        # mask_dir_name = 'mask' # gt_mask_dir  #### ???? -> first_mask
+        check_mask_dir_name = 'mask'
+        mask_dir_name = 'first_mask' 
         depth_dir_name = 'inpaint_depth'
         mask_rgb_dir_name = 'mask_rgb'
         for action in action_list :
@@ -86,6 +88,7 @@ class Sad_step_2(data.Dataset):
                     # here can use gt mask of predcited mask
                     # mask = os.path.join(frame_dir_dir, mask_dir_name, frame_name[:-4] + '.jpg')
                     gt_mask = os.path.join(frame_dir_dir, mask_dir_name, frame_name[:-4] + '.jpg')
+                    check_mask = os.path.join(frame_dir_dir, check_mask_dir_name, frame_name[:-4] + '.jpg')
                     depth = os.path.join(frame_dir_dir, depth_dir_name, frame_name[:-4] + '.npy')
 
                     # frame_dir_dir : /home/s5078345/Affordance-Detection-on-Video/dataset_two_steps/./dataset_original/home_living_room/chair_2_angle_2/remove_object_on_it_1
@@ -98,9 +101,9 @@ class Sad_step_2(data.Dataset):
                     mask_rgb = os.path.join(frame_dir_dir, mask_rgb_dir_name, frame_name[:-4] + '.jpg')
 
                     affordance_label = None
-                    if os.path.exists(gt_mask) and os.path.exists(mask_rgb) :
+                    if os.path.exists(check_mask) and os.path.exists(mask_rgb) :
                         affordance_label = True
-                    elif os.path.exists(gt_mask) and not os.path.exists(mask_rgb) :
+                    elif os.path.exists(check_mask) and not os.path.exists(mask_rgb) :
                         affordance_label = False 
                     else :
                         print("Mask got wrong QQ")
@@ -126,7 +129,7 @@ class Sad_step_2(data.Dataset):
             video_data = self.valid_list[index]
 
         video_input = torch.zeros(video_len, 3, self.inp_res, self.inp_res)
-        # video_input_depth = torch.zeros(video_len, 1, self.inp_res, self.inp_res)
+        video_input_depth = torch.zeros(video_len, 1, self.inp_res, self.inp_res)
         video_input_mask = torch.zeros(video_len, 1, self.inp_res, self.inp_res)
         video_target_label = torch.zeros(video_len, 1)
 
@@ -190,7 +193,7 @@ class Sad_step_2(data.Dataset):
             ##############################################
             # Output
             video_input[i] = inp
-            # video_input_depth[i] = input_depth
+            video_input_depth[i] = input_depth
             video_input_mask[i] = input_mask
             if affordance_label == True :
                 video_target_label[i] = torch.tensor([1.])
@@ -203,7 +206,7 @@ class Sad_step_2(data.Dataset):
         # Meta info
         meta = {'index': index, 'mask_path_list': mask_path_list, 'image_index_list' : image_index_list}
         
-        return video_input, video_input_mask, video_target_label, meta
+        return video_input, video_input_depth, video_input_mask, video_target_label, meta
 
     def random_shift(self, img, mask, depth, height_shift, width_shift):
         IMG_HEIGHT = self.inp_res

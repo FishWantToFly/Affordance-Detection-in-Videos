@@ -112,12 +112,12 @@ class AffordanceClassificationNet(nn.Module):
         self.num_stacks = num_stacks
 
         # # input channel number. 3 (RGB) + 1 (mask)
-        self.conv1 = nn.Conv2d(4, self.inplanes, kernel_size=7, stride=2, padding=3,
-                               bias=True)
-        
-        #  input channel number. 3 (RGB) + 1 (depth) + 1 (last_pred_mask)
-        # self.conv1 = nn.Conv2d(5, self.inplanes, kernel_size=7, stride=2, padding=3,
+        # self.conv1 = nn.Conv2d(4, self.inplanes, kernel_size=7, stride=2, padding=3,
                             #    bias=True)
+        
+        #  input channel number. 3 (RGB) + 1 (depth) + 1 (mask)
+        self.conv1 = nn.Conv2d(5, self.inplanes, kernel_size=7, stride=2, padding=3,
+                               bias=True)
 
         self.bn1 = nn.BatchNorm2d(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
@@ -214,7 +214,11 @@ class AffordanceClassificationNet(nn.Module):
         x = self.layer3(x) # layer before stacked hourgasss model # [B, 256, 64, 64]
 
         x, last_state = self.convLSTM(x, input_last_state) 
-        # out = x # torch.Size([B, 64, 64, 64])
+
+
+        '''
+        2020.5.15 test to move out attention module
+        '''
         original_x = x # [B, 64, 64, 64]
         x = self.residual(x) 
         x = self.SE_layer(x) # [B, 64, 64, 64] # SE block and scale back to x

@@ -96,7 +96,7 @@ def final_preds(output, center, scale, res):
 
     return preds
 
-def intersectionOverUnion(output, target, idxs):
+def intersectionOverUnion(output, target, idxs, return_list = None):
     ''' 
     Calculate IoU
     output : Batch * Class * W * H
@@ -127,7 +127,10 @@ def intersectionOverUnion(output, target, idxs):
 
     # print(np.mean(iou))
     # print()
-    return np.mean(iou)
+    if return_list == True : 
+        return iou
+    else :
+        return np.mean(iou)
 
 
 class AverageMeter(object):
