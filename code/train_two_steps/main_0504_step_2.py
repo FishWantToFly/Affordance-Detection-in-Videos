@@ -1,6 +1,8 @@
 '''
 Step 2 in two_steps (segmentation + binary classification)
 
+# use GT mask as input
+
 # training 
 python main.py
 # training using only 10 actions (for test)

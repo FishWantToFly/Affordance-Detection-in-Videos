@@ -1,0 +1,10 @@
+./dataset_original/coco_all/train2017_with_binary_mask/image_3127
+./dataset_original/coco_all/train2017_with_binary_mask/image_4546
+./dataset_original/coco_all/train2017_with_binary_mask/image_6584
+./dataset_original/coco_all/train2017_with_binary_mask/image_2099
+./dataset_original/coco_all/train2017_with_binary_mask/image_2877
+./dataset_original/coco_all/train2017_with_binary_mask/image_4294
+./dataset_original/coco_all/train2017_with_binary_mask/image_4612
+./dataset_original/coco_all/train2017_with_binary_mask/image_2015
+./dataset_original/coco_all/train2017_with_binary_mask/image_7984
+./dataset_original/coco_all/train2017_with_binary_mask/image_2043

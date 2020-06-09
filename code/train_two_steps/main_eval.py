@@ -4,6 +4,7 @@ Step 1 output is pre-generated (from args.mask)
 
 python main_eval.py --mask ./checkpoint_0428/pred_vis --resume ./checkpoint_0523_input_pred_mask/checkpoint_best_iou.pth.tar -e
 
+python main_eval.py --mask ./checkpoint_0428/pred_vis --resume ./checkpoint_0523_input_pred_mask/checkpoint_best_iou.pth.tar -e -r
 '''
 from __future__ import print_function, absolute_import
 
@@ -26,7 +27,7 @@ from affordance.utils.logger import Logger, savefig
 from affordance.utils.evaluation import accuracy, AverageMeter, final_preds, intersectionOverUnion
 from affordance.utils.misc import save_checkpoint, save_pred, adjust_learning_rate
 from affordance.utils.osutils import mkdir_p, isfile, isdir, join
-from affordance.utils.imutils import batch_with_heatmap, sample_test, relabel_heatmap
+from affordance.utils.imutils import batch_with_heatmap, sample_test, relabel_heatmap, eval_heatmap
 from affordance.utils.transforms import fliplr, flip_back
 import affordance.models as models
 import affordance.datasets as datasets
@@ -215,9 +216,9 @@ def main(args):
         RELABEL = True
         if args.evaluate:
             print('\nRelabel val label')
-            loss, acc = validate(val_loader, model, criterion, njoints,
+            loss, acc, final_acc  = validate(val_loader, model, criterion, njoints,
                                     args.checkpoint, args.debug, args.flip)
-            print("Val acc: %.3f" % (acc))
+            print("Final acc: %.3f" % (final_acc))
             return 
 
     # evaluation only
@@ -242,6 +243,14 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
     acces = AverageMeter()
     ioues = AverageMeter()
 
+    # for statistic
+    gt_trues = AverageMeter()
+    gt_falses = AverageMeter()
+    pred_trues = AverageMeter() # true == true and iou > 50%
+    pred_falses = AverageMeter()
+    
+    pred_trues_first = AverageMeter() # true == true
+
     # iou > 50% and step 2 labels are both right -> correcct
     # if label is false (and pred is false too) -> correct
     final_acces = AverageMeter() 
@@ -256,7 +265,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
     with torch.no_grad():
         for i, (input, input_depth, input_mask, target, meta, gt_mask) in enumerate(val_loader):
             
-            # if i == 1 : break
+            # if i == 10 : break
 
             # measure data loading time
             data_time.update(time.time() - end)
@@ -270,6 +279,13 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             acc_list = []
             iou_list = []
             final_acc_list = []
+
+            # for statistic
+            gt_true_list = []
+            gt_false_list = []
+            pred_true_list = []
+            pred_false_list = []
+            pred_true_first_list = []
 
             for j in range(6):
                 input_now = input[:, j] # [B, 3, 256, 256]
@@ -293,52 +309,77 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                 temp_2 = (round_output == 0) & (target_now == 0)
                 temp_acc_2 = temp_2.cpu().numpy()
                 
-                
-            
-
                 temp_iou = intersectionOverUnion(gt_mask_now, input_mask_now.cpu(), idx, return_list = True)
                 
                 final_pred_1 = np.logical_and(temp_acc_1, temp_iou > 0.5)
                 final_pred_2 = temp_acc_2
                 final_pred = np.logical_or(final_pred_1, final_pred_2)
 
-                
-                # final_pred = np.logical_and(temp_acc, temp_iou > 0.5)
-
-
                 acc_list.append(temp_acc)
                 final_acc_list.append(np.sum(final_pred) / batch_size)
-                # print(np.sum(final_pred) / batch_size)
-
-
                 round_output = round_output.cpu()
+
+                # for statistic
+                temp_1 = (target_now == 1).cpu().numpy()
+                temp_2 = (target_now == 0).cpu().numpy()
+                gt_true_list.append(np.sum(temp_1) / batch_size)
+                gt_false_list.append(np.sum(temp_2) / batch_size)
+
+                pred_true_list.append(np.sum(final_pred_1) / batch_size)
+                pred_false_list.append(np.sum(final_pred_2) / batch_size)
+                pred_true_first_list.append(np.sum(temp_acc_1) / batch_size)
+
+                
                 if RELABEL:
-                    # save in same checkpoint
-                    raw_mask_path = meta['mask_path_list'][j][0]
-                    img_index = meta['image_index_list'][j][0]
-                    temp_head = ('/').join(raw_mask_path.split('/')[:-8])
-                    temp_tail = ('/').join(raw_mask_path.split('/')[-5:])
-                    temp = os.path.join(temp_head, 'code/train_two_steps', checkpoint, 'pred_vis', temp_tail)
-                    relabel_mask_dir, relabel_mask_name = os.path.split(temp)
-                    relabel_mask_dir = os.path.dirname(relabel_mask_dir)
-
-                    raw_mask_rgb_path = os.path.join(os.path.dirname(os.path.dirname(raw_mask_path)), 'first_mask_rgb', relabel_mask_name)
-                    new_mask_rgb_path = os.path.join(relabel_mask_dir, 'gt_' + relabel_mask_name)
-                    raw_rgb_frame_path = os.path.join(os.path.dirname(os.path.dirname(raw_mask_path)), 'raw_frames', \
-                        relabel_mask_name[:-4] + '.png')
-
+                    '''
+                    left image : GT
+                        image : gt_mask_rgb
+                        label : target_now
+                    right image : predict result
+                        image : raw_frames (pred false) or ./checkpoint_0428/pred_vis (pred true)
+                        label : round_output
+                    '''
                     from PIL import Image
                     import numpy as np
-                    if os.path.exists(raw_mask_rgb_path):
-                        gt_mask_rgb = np.array(Image.open(raw_mask_rgb_path))
+                    import copy
+
+                    # save in same checkpoint
+                    img_index = meta['image_index_list'][j][0]
+
+                    raw_mask_path = meta['mask_path_list'][j][0]
+                    gt_mask_path = meta['gt_mask_path_list'][j][0]
+
+                    temp_head = ('/').join(gt_mask_path.split('/')[:-8])
+                    temp_tail = ('/').join(gt_mask_path.split('/')[-5:])
+                    temp = os.path.join(temp_head, 'code/train_two_steps/eval', 'pred_vis', temp_tail)
+                    relabel_mask_dir, relabel_mask_name = os.path.split(temp)
+                    relabel_mask_dir = os.path.dirname(relabel_mask_dir) # new dir name for pred_vis
+
+                    # raw frame
+                    raw_rgb_frame_path = os.path.join(os.path.dirname(os.path.dirname(gt_mask_path)), 'raw_frames', gt_mask_path.split('/')[-1][:-4] + '.png')
+                    raw_frame = np.array(Image.open(raw_rgb_frame_path))
+
+                    # gt_mask_rgb
+                    gt_mask_rgb_path = os.path.join(os.path.dirname(os.path.dirname(gt_mask_path)), 'mask_rgb', gt_mask_path.split('/')[-1])
+                    if os.path.exists(gt_mask_rgb_path):
+                        gt_mask_rgb = np.array(Image.open(gt_mask_rgb_path))
                     else :
-                        gt_mask_rgb = np.array(Image.open(raw_rgb_frame_path))
+                        gt_mask_rgb = copy.deepcopy(raw_frame)
+
+                    # pred mask
+                    pred_mask_path = os.path.join(os.path.dirname(raw_mask_path), relabel_mask_name)
+                    pred_mask = np.array(Image.open(pred_mask_path))
+
+                    pred_mask_rgb = eval_heatmap(raw_frame, pred_mask) # generate rgb 
+
 
                     if not isdir(relabel_mask_dir):
                         mkdir_p(relabel_mask_dir)
 
                     gt_label_str = None 
                     pred_label_str = None
+                    gt_output = gt_mask_rgb
+                    pred_output = None
 
                     if target_now[0][0] == 0:
                         gt_label_str = "GT : False"
@@ -347,30 +388,51 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
 
                     if round_output[0][0] == 0:
                         pred_label_str = "Pred : False"
+                        pred_output = raw_frame
                     elif round_output[0][0] == 1:
-                        pred_label_str = "Pred : True"
-                    output_str = gt_label_str + '. ' + pred_label_str
+                        pred_output = pred_mask_rgb
+                        if target_now[0][0] == 0 : 
+                            pred_label_str = "Pred : True"
+                        elif target_now[0][0] == 1 and temp_iou > 0.5 : 
+                            pred_label_str = "Pred : True (IoU : O)"
+                        elif target_now[0][0] == 1 and temp_iou <= 0.5 :
+                            pred_label_str = "Pred : True (IoU : X)"
+                        
+                    # output_str = gt_label_str + '. ' + pred_label_str
 
-                    # if target_now[0][0] != round_output[0][0] : 
-                    #     print(raw_rgb_frame_path)
+                    if not gt_win or not pred_win:
+                        ax1 = plt.subplot(121)
+                        ax1.title.set_text(gt_label_str)
+                        gt_win = plt.imshow(gt_output)
+                        ax2 = plt.subplot(122)
+                        ax2.title.set_text(pred_label_str)
+                        pred_win = plt.imshow(pred_output)
 
-                    if not gt_win:
-                        plt.plot()
-                        plt.title(output_str)
-                        gt_win = plt.imshow(gt_mask_rgb)
                     else:
-                        plt.title(output_str)
-                        gt_win.set_data(gt_mask_rgb)
+                        gt_win.set_data(gt_output)
+                        pred_win.set_data(pred_output)
+
+                        ax1.title.set_text(gt_label_str)
+                        ax2.title.set_text(pred_label_str)
 
                     plt.plot()
                     index_name = "%05d.jpg" % (img_index)
                     plt.savefig(os.path.join(relabel_mask_dir, 'vis_' + index_name))
+                    
                 
 
             # measure accuracy and record loss
             losses.update(loss.item(), input.size(0))
             acces.update(sum(acc_list) / len(acc_list), input.size(0))
             final_acces.update(sum(final_acc_list) / len(final_acc_list), input.size(0))
+
+            # for statistic
+            gt_trues.update(sum(gt_true_list) / len(gt_true_list), input.size(0))
+            gt_falses.update(sum(gt_false_list) / len(gt_false_list), input.size(0))
+            pred_trues.update(sum(pred_true_list) / len(pred_true_list), input.size(0))
+            pred_falses.update(sum(pred_false_list) / len(pred_false_list), input.size(0))
+            pred_trues_first.update(sum(pred_true_first_list) / len(pred_true_first_list), input.size(0))
+
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -388,6 +450,17 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                         )
             bar.next()
         bar.finish()
+    
+    # for statistic
+    print("GT true : %.3f" % (gt_trues.avg))
+    print("GT false : %.3f" % (gt_falses.avg))
+    print("Pred true : %.3f" % (pred_trues.avg))
+    print("Pred false : %.3f" % (pred_falses.avg))
+    print("====")
+    print("Pred true (no considering Iou) : %.3f" % (pred_trues_first.avg))
+    print("IoU > 50 percent accuracy : %.3f" % (pred_trues.avg / pred_trues_first.avg))
+    print()
+
     return losses.avg, acces.avg, final_acces.avg
 
 if __name__ == '__main__':

@@ -194,10 +194,7 @@ def main(args):
         num_workers=args.workers, pin_memory=True
     )
 
-    for i, (input, input_depth, input_mask, target, meta) in enumerate(val_loader):
-        if i == 10 : break
-        print(input.shape)
-    return 
+
 
     val_dataset = datasets.__dict__[args.dataset](is_train=False, **vars(args))
     val_loader = torch.utils.data.DataLoader(

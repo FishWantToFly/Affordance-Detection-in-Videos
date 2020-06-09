@@ -1,0 +1,10 @@
+./dataset_original/coco/support_false/image_0001
+dataset_horizontally_flip/coco/support_false/image_0001
+./dataset_original/coco/support_true/image_0028
+dataset_horizontally_flip/coco/support_true/image_0028
+./dataset_original/coco/support_false/image_0032
+dataset_horizontally_flip/coco/support_false/image_0032
+./dataset_original/coco/support_false/image_0081
+dataset_horizontally_flip/coco/support_false/image_0081
+./dataset_original/coco/support_true/image_0095
+dataset_horizontally_flip/coco/support_true/image_0095

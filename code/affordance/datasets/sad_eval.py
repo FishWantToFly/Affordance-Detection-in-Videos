@@ -129,6 +129,7 @@ class Sad_eval(data.Dataset):
         video_len = 6
         mask_path_list = []
         image_index_list = []
+        gt_mask_path_list = []
 
         # img_path, mask_path, depth_path = self.train_list[index]
         if self.is_train:
@@ -179,9 +180,10 @@ class Sad_eval(data.Dataset):
 
             mask_path_list.append(mask_path)
             image_index_list.append(_index)
+            gt_mask_path_list.append(gt_mask_path)
 
         # Meta info
-        meta = {'index': index, 'mask_path_list': mask_path_list, 'image_index_list' : image_index_list}
+        meta = {'index': index, 'mask_path_list': mask_path_list, 'image_index_list' : image_index_list, 'gt_mask_path_list' : gt_mask_path_list}
         
         return video_input, video_input_depth, video_input_mask, video_target_label, meta, video_gt_mask
 

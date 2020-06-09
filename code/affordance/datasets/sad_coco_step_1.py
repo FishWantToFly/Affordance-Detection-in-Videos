@@ -1,6 +1,6 @@
 '''
-2020.4.28 two steps 
-1. affordance segmentation (first_mask)
+2020.6.5 step 1 for coco dataset 
+just provide one image per action
 '''
 
 from __future__ import print_function, absolute_import
@@ -19,8 +19,7 @@ from affordance.utils.osutils import *
 from affordance.utils.imutils import *
 from affordance.utils.transforms import *
 
-
-class Sad_step_1(data.Dataset):
+class Sad_coco_step_1(data.Dataset):
     def __init__(self, is_train = True, **kwargs):
         self.img_folder = kwargs['image_path'] # root image folders
         self.is_train   = is_train # training set or test set
@@ -29,20 +28,23 @@ class Sad_step_1(data.Dataset):
         self.sigma      = kwargs['sigma']
         self.dataset_list_dir_path = kwargs['dataset_list_dir_path']
 
-        self.semantic_dict = {'basket': 0, 'chair': 1, 'plate': 2, 'sofa': 3, 'table': 4}
-        self.semantic_len = len(self.semantic_dict)
-
         # contain img and annotation
 
         if kwargs['relabel']: # for relabel / visualization
             self.train_list = self.load_full_file_list('test_list') # dummy
             self.valid_list = self.load_full_file_list('original_data_list')
+
         elif kwargs['test'] == True:
             self.train_list = self.load_full_file_list('train_list_10')
             self.valid_list = self.load_full_file_list('test_list_10')
         else :
-            self.train_list = self.load_full_file_list('train_list')
-            self.valid_list = self.load_full_file_list('test_list')
+            # 100 and 109
+            # self.train_list = self.load_full_file_list('train_list')
+            # self.valid_list = self.load_full_file_list('test_list')
+
+            # about 8000 images
+            self.train_list = self.load_full_file_list('train_list_v1')
+            self.valid_list = self.load_full_file_list('test_list_v1')
             print("Train set number : %d" % len(self.train_list))
             print("Test set number : %d" % len(self.valid_list))
 
@@ -57,45 +59,32 @@ class Sad_step_1(data.Dataset):
                 action_list.append(inner_list[0])
 
         image_dir_name = 'raw_frames'
-        mask_dir_name = 'first_mask' # change !!!!
+        mask_dir_name = 'mask'
         depth_dir_name = 'inpaint_depth'
         for action in action_list :
+            temp = []
             action_rgb_frames = glob.glob(os.path.join(self.img_folder, action, image_dir_name, '*.png'))
-            semantic_name = os.path.basename(os.path.dirname(action)).split('_')[0]
-            semantic_label = self.semantic_dict[semantic_name]
 
-            # for video training
-            # each time there are 6 feames, overlap = 2 frames
+            # just one image per action
             sorted_action_rgb_frames = sorted(action_rgb_frames)
-            start_frame = -4 # -> 0
-            
-            while (True) :
-                start_frame += 4
-                if (start_frame + 6) >= len(action_rgb_frames):
-                    start_frame = (len(action_rgb_frames)) - 6
 
-                temp = [] 
-                for i in range(6):
-                    _index = start_frame + i
-                    frame = sorted_action_rgb_frames[start_frame + i] 
-                    frame_name = os.path.basename(frame)
-                    frame_dir_dir = os.path.dirname(os.path.dirname(frame))
-                    mask = os.path.join(frame_dir_dir, mask_dir_name, frame_name[:-4] + '.jpg')
-                    depth = os.path.join(frame_dir_dir, depth_dir_name, frame_name[:-4] + '.npy')
-                    temp.append([frame, mask, depth, _index])
-                all_files.append(temp)
+            frame = sorted_action_rgb_frames[0] 
+            frame_name = os.path.basename(frame)
+            frame_dir_dir = os.path.dirname(os.path.dirname(frame))
+            mask = os.path.join(frame_dir_dir, mask_dir_name, frame_name[:-4] + '.jpg')
 
-                # reach the end
-                if (start_frame + 6) == len(action_rgb_frames):
-                    break
+
+            _index = 0
+            temp.append([frame, mask, _index])
+            all_files.append(temp)
+
         return all_files
     
     def __getitem__(self, index):
-        video_len = 6
-        mask_path_list = []
+        video_len = 1 # one image now
+        mask_path_list = [] 
         image_index_list = []
 
-        # img_path, mask_path, depth_path = self.train_list[index]
         if self.is_train:
             video_data = self.train_list[index]
         else :
@@ -127,19 +116,18 @@ class Sad_step_1(data.Dataset):
         width_shift = random.randint(-w_num, w_num)
 
         for i in range(video_len):
-            img_path, mask_path, depth_path, _index = video_data[i]
+            img_path, mask_path, _index = video_data[i]
 
             # load image and mask
             img = load_image(img_path)  # CxHxW
             a = load_mask(mask_path)    # 1xHxW
-            depth = load_depth(depth_path)
+            # depth = load_depth(depth_path)
             
             nparts = 1 # should change if target is more than 2
 
             # Prepare image and groundtruth map
-            # inp = crop(img, c, s, [self.inp_res, self.inp_res], rot=r)
             inp = resize(img, self.inp_res, self.inp_res) # get normalized rgb value
-            input_depth = resize(depth, self.inp_res, self.inp_res)
+            input_depth = torch.zeros(1, self.inp_res, self.inp_res) # no meaning
 
             # Generate ground truth
             target = torch.zeros(nparts, self.out_res, self.out_res) # [1, out_res, out_res]
@@ -154,7 +142,7 @@ class Sad_step_1(data.Dataset):
                     for y in range(S_num):
                         if occlusion_map[x][y] == 0 :
                             inp[:, x*S : x*S + S, y*S : y*S + S] = 0
-                            input_depth[x*S : x*S + S, y*S : y*S + S] = 0
+                            # input_depth[x*S : x*S + S, y*S : y*S + S] = 0
                             _target[x*S : x*S + S, y*S : y*S + S] = 0 
 
             # Random shift
@@ -166,7 +154,7 @@ class Sad_step_1(data.Dataset):
             # Output
             target[0] = resize(_target, self.out_res, self.out_res) # resize from 256x256 -> 64x64
             video_input[i] = inp
-            video_input_depth[i] = input_depth
+            # video_input_depth[i] = input_depth
             video_target[i] = target
             mask_path_list.append(mask_path)
             image_index_list.append(_index)
@@ -220,7 +208,7 @@ class Sad_step_1(data.Dataset):
         else:
             return len(self.valid_list)
 
-def sad_step_1(**kwargs):
-    return Sad_step_1(**kwargs)
+def sad_coco_step_1(**kwargs):
+    return Sad_coco_step_1(**kwargs)
 
-sad_step_1.njoints = 1  # ugly but works
+sad_coco_step_1.njoints = 1  # ugly but works

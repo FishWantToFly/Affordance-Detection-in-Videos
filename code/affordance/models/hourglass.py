@@ -7,6 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 
+from .squeeze_and_excitation import ChannelSELayer
+
 # from .preresnet import BasicBlock, Bottleneck
 
 
@@ -54,7 +56,6 @@ class Bottleneck(nn.Module):
 
         return out
 
-
 class Hourglass(nn.Module):
     def __init__(self, block, num_blocks, planes, depth):
         super(Hourglass, self).__init__()
@@ -95,7 +96,6 @@ class Hourglass(nn.Module):
 
     def forward(self, x):
         return self._hour_glass_forward(self.depth, x)
-
 
 class HourglassNet(nn.Module):
     '''Hourglass model from Newell et al ECCV 2016'''
@@ -148,6 +148,13 @@ class HourglassNet(nn.Module):
         ### prev mask
         self.last_mask_layer = nn.Conv2d(ch + 1, ch, kernel_size=1, bias=True)
         # self.dropout_layer = nn.Dropout(p=0.75) # if have bn, these is no need of dropout
+
+
+        # attention
+        # self.SE_layer_1 = ChannelSELayer(256)
+        # self.SE_layer_2 = ChannelSELayer(256)
+        # self.res_1 = self._make_residual(block, self.num_feats, 1)
+        # self.res_2 = self._make_residual(block, self.num_feats, 1)
 
     def _make_residual(self, block, planes, blocks, stride=1):
         '''
@@ -215,11 +222,30 @@ class HourglassNet(nn.Module):
                 else :
                     pass # x = x
             y = self.hg[i](x) # x will be residual data in last line # [B, 256, 64, 64]
+
+
+            # old
             y = self.res[i](y)
+
+            # new 2020.5.26
+            # replace it by SE block ???
+            
+            # if i == 0 or i == 2:
+            #     original_y = y # [B, 256, 64, 64]
+            #     if i == 0:
+            #         y = self.res_1(y) 
+            #         y = self.SE_layer_1(y)
+            #     elif i == 2:
+            #         y = self.res_2(y) 
+            #         y = self.SE_layer_2(y)
+            #     y = y + original_y
+            # else :
+            #     y = self.res[i](y)
+            
+
             y = self.fc[i](y) # 256 x 64 x 64
 
             score = self.score[i](y) # blue block in hourglass paper
-            ## 2020.3.1 for IoU loss
             score = self.sigmoid(score)
             out.append(score) # for computing intermediate loss
             if i < self.num_stacks-1:
@@ -229,8 +255,6 @@ class HourglassNet(nn.Module):
 
         return out, out_tsm_feature
         
-        # semantic
-        # return out, out_test
 
 
 

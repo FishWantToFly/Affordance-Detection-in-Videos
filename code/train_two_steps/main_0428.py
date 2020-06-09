@@ -1,26 +1,24 @@
 '''
-coy from main_0413_input_1298.py
-i.e. input resolution now is 128x128
-lr : 5e-4 -> 5e-5
-
 
 # training 
-python main.py
+python main_0428.py
 # training using only 10 actions (for test)
 python main.py -t 
 
 # resume training from checkpoint
-python main.py --resume ./checkpoint/checkpoint_20.pth.tar
+python main_0428.py --resume ./checkpoint_0605_coco_all_step_1/checkpoint_best_iou.pth.tar
+# resume pre-training from checkpoint
+python main_0428.py --resume ./checkpoint_0605_coco_all_step_1/checkpoint_best_iou.pth.tar -p
+
+
 # draw line chart (loss and IoU curve)
 python main.py --resume ./checkpoint/checkpoint_20.pth.tar -w
-# visualization of pred / gt image (random)
-python main.py --resume ./checkpoint/checkpoint_20.pth.tar -e -d 
 
 # relabel train/test (visualize in same architecture)
-python main.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
+python main_0428.py --resume ./checkpoint_0606_coco_fine_tune_step_1/checkpoint_best_iou.pth.tar -e -r
 
 # temp
-python main_0428.py --resume ./checkpoint_0428/checkpoint_best_iou.pth.tar -e
+python main_0428.py --resume ./checkpoint_0606_coco_fine_tune_step_1/checkpoint_best_iou.pth.tar -e
 '''
 from __future__ import print_function, absolute_import
 
@@ -29,6 +27,8 @@ import argparse
 import time
 import matplotlib.pyplot as plt
 import random
+
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 import torch
 import torch.nn.parallel
@@ -48,8 +48,6 @@ from affordance.utils.transforms import fliplr, flip_back
 import affordance.models as models
 import affordance.datasets as datasets
 import affordance.losses as losses
-
-os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1'
 
 # get model names and dataset names
 model_names = sorted(name for name in models.__dict__
@@ -117,7 +115,12 @@ def main(args):
     # 2020.3.4
     # if you do type arg.resume
     # args.checkpoint would be derived from arg.resume
-    if args.resume != '':
+
+    if args.pre_train:
+        # pre train lr = 5e-4
+        args.lr = 5e-5
+
+    if args.resume != '' and args.pre_train == False:
         args.checkpoint = ('/').join(args.resume.split('/')[:2])
     if args.relabel == True:
         args.test_batch = 1
@@ -126,7 +129,7 @@ def main(args):
         args.test_batch = 4
         args.epochs = 20
 
-    if args.evaluate :
+    if args.evaluate and args.relabel == False:
         args.test_batch = 10
 
     # write line-chart and stop program
@@ -158,6 +161,14 @@ def main(args):
                                        num_classes=njoints,
                                        resnet_layers=args.resnet_layers)
 
+    # 2020.6.7
+    # freeze feature extraction and first one hg model paras
+    # freeze_list = [model.conv1, model.bn1, model.layer1, model.layer2, model.layer3, \
+    #     model.hg[0], model.res[0], model.fc[0], \
+    #     model.score[0],model.fc_[0], model.score_[0]]
+    # for freeze_layer in freeze_list :
+    #     for param in freeze_layer.parameters():
+    #         param.requires_grad = False
 
     model = torch.nn.DataParallel(model).to(device)
 
@@ -170,8 +181,12 @@ def main(args):
                                         momentum=args.momentum,
                                         weight_decay=args.weight_decay)
     elif args.solver == 'adam':
+        # optimizer = torch.optim.Adam(
+        #     model.parameters(),
+        #     lr=args.lr,
+        # )
         optimizer = torch.optim.Adam(
-            model.parameters(),
+            filter(lambda p: p.requires_grad, model.parameters()),
             lr=args.lr,
         )
     else:
@@ -180,17 +195,38 @@ def main(args):
 
     # optionally resume from a checkpoint
     title = args.dataset + ' ' + args.arch
-    if args.resume:
+    if args.pre_train:
+        if isfile(args.resume):
+                print("=> loading checkpoint '{}'".format(args.resume))
+                checkpoint = torch.load(args.resume)
+
+                # start from epoch 0
+                args.start_epoch = 0
+                best_iou = 0
+                model.load_state_dict(checkpoint['state_dict'])
+
+                print("=> loaded checkpoint '{}' (epoch {})"
+                    .format(args.resume, checkpoint['epoch']))
+                logger = Logger(join(args.checkpoint, 'log.txt'), title=title)
+                logger.set_names(['Epoch', 'LR', 'Train Loss', 'Val Loss', 'Val IoU'])
+        else:
+            print("=> no checkpoint found at '{}'".format(args.resume))
+    elif args.resume:
         if isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
             checkpoint = torch.load(args.resume)
-            args.start_epoch = checkpoint['epoch']
-            best_iou = checkpoint['best_iou']
+            # args.start_epoch = checkpoint['epoch']
+            # best_iou = checkpoint['best_iou']
+
+            # start from epoch 0
+            args.start_epoch = 0
+            best_iou = 0
+
             model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.resume, checkpoint['epoch']))
             logger = Logger(join(args.checkpoint, 'log.txt'), title=title, resume=True)
+        
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
     else:
@@ -233,7 +269,8 @@ def main(args):
             print('\nRelabel val label')
             loss, iou, predictions = validate(val_loader, model, criterion, njoints,
                                     args.checkpoint, args.debug, args.flip)
-            print("Val IoU: %.3f" % (iou))
+            # Because test and val are all considered -> iou is uesless
+            # print("Val IoU: %.3f" % (iou))
             return 
 
     # evaluation only
@@ -294,7 +331,7 @@ def main(args):
     logger.close()
 
     print("Best iou = %.3f" % (best_iou))
-    draw_line_chart(args, os.path.join(args.checkpoint, 'log.txt'))
+    # draw_line_chart(args, os.path.join(args.checkpoint, 'log.txt'))
 
 def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
     batch_time = AverageMeter()
@@ -457,11 +494,6 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                 else:  # single output
                     pass
 
-                # 64x64 : 50.2
-                # 256x256 : ?
-
-                # from affordance.utils.imutils import resize
-
                 temp_iou = intersectionOverUnion(output.cpu(), target_now.cpu(), idx) # have not tested
                 iou_list.append(temp_iou)
                 score_map = output[-1].cpu() if type(output) == list else output.cpu()
@@ -493,6 +525,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                     # print(input_now.shape)
                     # print(score_map.shape)
                     pred_batch_img, pred_mask = relabel_heatmap(input_now, score_map, 'pred') # return an Image object
+                    
                     if not isdir(relabel_mask_dir):
                         mkdir_p(relabel_mask_dir)
 
@@ -510,7 +543,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                     index_name = "%05d.jpg" % (img_index)
                     plt.savefig(os.path.join(relabel_mask_dir, 'vis_' + index_name))
                     pred_mask.save(os.path.join(relabel_mask_dir, index_name)) 
-                    # print(os.path.join(relabel_mask_dir, index_name))
+                    
 
             # measure accuracy and record loss
             losses.update(loss.item(), input.size(0))
@@ -590,14 +623,16 @@ if __name__ == '__main__':
                         help='manual epoch number (useful on restarts)')
 
     # 2 GPU setting
-    parser.add_argument('--train-batch', default=8, type=int, metavar='N',
-                        help='train batchsize')
-    parser.add_argument('--test-batch', default=8, type=int, metavar='N',
-                        help='train batchsize')
-    # parser.add_argument('--train-batch', default=20, type=int, metavar='N', # for input resolution 128x128
+    # parser.add_argument('--train-batch', default=8, type=int, metavar='N',
                         # help='train batchsize')
-    # parser.add_argument('--test-batch', default=20, type=int, metavar='N',
-                        # help='test batchsize')
+    # parser.add_argument('--test-batch', default=8, type=int, metavar='N',
+                        # help='train batchsize')
+
+
+    parser.add_argument('--train-batch', default=4, type=int, metavar='N',
+                        help='train batchsize')
+    parser.add_argument('--test-batch', default=4, type=int, metavar='N',
+                        help='train batchsize')
 
 
     parser.add_argument('--lr', '--learning-rate', default=2e-4, type=float,
@@ -640,5 +675,8 @@ if __name__ == '__main__':
     # 2020.3.2 for relabel (only use once)
     parser.add_argument('-r', '--relabel', dest='relabel', action='store_true',
                         help='Use model prediction to relabel label')
+
+    parser.add_argument('-p', '--pre-train', action='store_true',
+                        help='pre-train or not')
 
     main(parser.parse_args())

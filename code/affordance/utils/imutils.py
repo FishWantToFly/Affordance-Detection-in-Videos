@@ -142,6 +142,7 @@ def color_heatmap(x, mode):
     color = np.zeros((x.shape[0],x.shape[1],3))
     if mode == 'gt' :
         gt_pos = (x != 0).nonzero()
+        # print(gt_pos)
     elif mode == 'pred' :
         x = x * 255 # because x is normalized before
         gt_pos = (x >= 0.5).nonzero() # have to exceed threshold
@@ -251,8 +252,8 @@ def color_heatmap_relabel(x, mode):
 
 
 def relabel_with_heatmap(inp, out, mode, num_rows=2, parts_to_show=None):
-    inp = to_numpy(inp * 255)
-    out = to_numpy(out)
+    inp = to_numpy(inp * 255) # [3, 256, 256]
+    out = to_numpy(out) # [1, 64, 64]
 
     img = np.zeros((inp.shape[1], inp.shape[2], inp.shape[0]))
     for i in range(3):
@@ -268,7 +269,7 @@ def relabel_with_heatmap(inp, out, mode, num_rows=2, parts_to_show=None):
     inp_small = np.array(Image.fromarray(img).resize((size, size)))
 
     part_idx = 0
-    out_resized = np.array(Image.fromarray(out[part_idx]).resize((size, size)))
+    out_resized = np.array(Image.fromarray(out[part_idx]).resize((size, size))) # [256, 256]
     out_resized = out_resized.astype(float)/255
     
     # print(out_resized.shape) # 256 256
@@ -294,3 +295,47 @@ def relabel_with_heatmap(inp, out, mode, num_rows=2, parts_to_show=None):
 def relabel_heatmap(inputs, outputs, mode, mean=torch.Tensor([0.5, 0.5, 0.5]).cuda(), num_rows=2, parts_to_show=None):
     inp = inputs[0]
     return relabel_with_heatmap(inp.clamp(0, 1), outputs[0], mode, num_rows=num_rows, parts_to_show=parts_to_show)
+
+##############
+# Eval
+##############
+
+def eval_image_plus_mask(img, mask, mode):
+    mask = to_numpy(mask) # 256x256
+    if mode == 'gt' :
+        gt_pos = (mask != 0).nonzero()
+        # print(gt_pos)
+    elif mode == 'pred' :
+        pass
+        # x = x * 255 # because x is normalized before
+        # gt_pos = (x >= 0.5).nonzero() # have to exceed threshold
+    pos_0, pos_1 = gt_pos
+    img[pos_0, pos_1] = (255, 0, 0)
+    return img
+
+def eval_heatmap(inp, out):
+    # inp [480, 640, 3]
+    # out [480, 640]
+
+    # print(out.shape)
+    inp = np.array(Image.fromarray(inp).resize((256, 256))) # [256, 256, 3]
+    out = np.array(Image.fromarray(out).resize((256, 256))) # [256, 256]
+
+    
+    img = np.asarray(inp, np.uint8)
+    size = img.shape[0] # 256
+
+    full_img = np.zeros((640, 480, 3), np.uint8)
+    inp_small = img
+
+    out_resized = out.astype(float)/255
+
+    out_img = eval_image_plus_mask(inp_small, out_resized, 'gt')
+    out_img = np.asarray(out_img, dtype = np.uint8)
+
+    full_img = Image.fromarray(out_img).resize((640, 480))
+
+    full_img = np.array(full_img)
+    full_img = np.asarray(full_img, np.uint8)
+
+    return full_img

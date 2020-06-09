@@ -1,0 +1,10 @@
+./dataset_original/coco/support_false/image_0084
+./dataset_original/coco/support_false/image_0010
+./dataset_original/coco/support_false/image_0015
+./dataset_original/coco/support_false/image_0060
+./dataset_original/coco/support_true/image_0033
+./dataset_original/coco/support_false/image_0103
+./dataset_original/coco/support_true/image_0002
+./dataset_original/coco/support_true/image_0000
+./dataset_original/coco/support_false/image_0025
+./dataset_original/coco/support_true/image_0021

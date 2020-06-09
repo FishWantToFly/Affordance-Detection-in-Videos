@@ -237,7 +237,6 @@ class AffordanceClassificationNet(nn.Module):
         out = x
         return out, last_state
 
-
 def ACNet(**kwargs):
     model = AffordanceClassificationNet(Bottleneck, num_stacks=kwargs['num_stacks'], num_blocks=kwargs['num_blocks'],
                          num_classes=kwargs['num_classes'])
