@@ -1,12 +1,12 @@
 '''
-Step 2 in two_steps (segmentation + binary classification)
+Step 2 
+train for coco and sad together
 
-# Use pred mask from checkpoint_0428/pred_vis as input
 
 # training 
-python main_0522_step_2.py --mask ./checkpoint_0428/pred_vis
+python main_0616_coco_sad_train_step_2.py --mask ./checkpoint_0428/pred_vis
 
-python main_0522_step_2.py --mask ./checkpoint_0613_coco_sad_train/pred_vis
+python main_0616_coco_sad_train_step_2.py --mask ./checkpoint_0613_coco_sad_train/pred_vis
 
 # resume training from checkpoint
 python main.py --resume ./checkpoint/checkpoint_20.pth.tar
@@ -135,16 +135,17 @@ def main(args):
         draw_line_chart(args, os.path.join(args.checkpoint, 'log.txt'))
         return
 
-    # idx is the index of joints used to compute accuracy
-    if args.dataset in ['mpii', 'lsp']:
-        idx = [1,2,3,4,5,6,11,12,15,16]
-    elif args.dataset == 'coco':
-        idx = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]
-    elif args.dataset == 'sad' or args.dataset == 'sad_step_2' or args.dataset == 'sad_step_2_eval' :
-        idx = [1] # support affordance
-    else:
-        print("Unknown dataset: {}".format(args.dataset))
-        assert False
+    # # idx is the index of joints used to compute accuracy
+    # if args.dataset in ['mpii', 'lsp']:
+    #     idx = [1,2,3,4,5,6,11,12,15,16]
+    # elif args.dataset == 'coco':
+    #     idx = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]
+    # elif args.dataset == 'sad' or args.dataset == 'sad_step_2' or args.dataset == 'sad_step_2_eval' :
+    #     idx = [1] # support affordance
+    # else:
+    #     print("Unknown dataset: {}".format(args.dataset))
+    #     assert False
+    idx = [1]
 
     # create checkpoint dir
     if not isdir(args.checkpoint):
@@ -208,14 +209,14 @@ def main(args):
         num_workers=args.workers, pin_memory=True
     )
 
-    '''
-    for i, (input, input_mask, target, meta) in enumerate(train_loader):
+    
+    for i, (input, input_depth, input_mask, target, meta) in enumerate(train_loader):
         print(len(input))
         print(input[0].shape)
         print(input_mask[0].shape)
         print(target[0].shape)
         return
-    '''
+    
 
     val_dataset = datasets.__dict__[args.dataset](is_train=False, **vars(args))
     val_loader = torch.utils.data.DataLoader(
@@ -493,6 +494,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
     return losses.avg, acces.avg
 
 if __name__ == '__main__':
+    '''
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
     parser.add_argument('--dataset', metavar='DATASET', default='sad_step_2_eval',
                         choices=dataset_names,
@@ -518,6 +520,121 @@ if __name__ == '__main__':
 
                         
     parser.add_argument('--dataset-list-dir-path', default='/home/s5078345/Affordance-Detection-on-Video/dataset_two_steps/data_list', type=str,
+                    help='dir of train/test data list')
+
+    # Model structure
+    parser.add_argument('--arch', '-a', metavar='ARCH', default='ACNet',
+                        choices=model_names,
+                        help='model architecture: ' +
+                            ' | '.join(model_names) +
+                            ' (default: hg)')
+    parser.add_argument('-s', '--stacks', default=4, type=int, metavar='N',
+                        help='Number of hourglasses to stack')
+    parser.add_argument('--features', default=256, type=int, metavar='N',
+                        help='Number of features in the hourglass')
+    parser.add_argument('--resnet-layers', default=50, type=int, metavar='N',
+                        help='Number of resnet layers',
+                        choices=[18, 34, 50, 101, 152])
+    parser.add_argument('-b', '--blocks', default=1, type=int, metavar='N',
+                        help='Number of residual modules at each location in the hourglass')
+    # Training strategy
+    parser.add_argument('--solver', metavar='SOLVER', default='adam',
+                        choices=['rms', 'adam'],
+                        help='optimizers')
+    parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
+                        help='number of data loading workers (default: 4)')
+    parser.add_argument('--epochs', default=100, type=int, metavar='N',
+                        help='number of total epochs to run')
+    parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
+                        help='manual epoch number (useful on restarts)')
+
+    # 2 GPU setting
+    # parser.add_argument('--train-batch', default=20, type=int, metavar='N',
+    #                     help='train batchsize')
+    # parser.add_argument('--test-batch', default=20, type=int, metavar='N',
+    #                     help='train batchsize')
+
+    # 1 GPU setting
+    parser.add_argument('--train-batch', default=14, type=int, metavar='N',
+                        help='train batchsize')
+    parser.add_argument('--test-batch', default=14, type=int, metavar='N',
+                        help='train batchsize')
+
+    parser.add_argument('--lr', '--learning-rate', default=2e-5, type=float,
+                        metavar='LR', help='initial learning rate')
+    parser.add_argument('--momentum', default=0, type=float, metavar='M',
+                        help='momentum')
+    parser.add_argument('--weight-decay', '--wd', default=0, type=float,
+                        metavar='W', help='weight decay (default: 0)')
+    parser.add_argument('--schedule', type=int, nargs='+', default=[30, 60, 90],
+                        help='Decrease learning rate at these epochs.')
+    parser.add_argument('--gamma', type=float, default=0.1,
+                        help='LR is multiplied by gamma on schedule.')
+    parser.add_argument('--target-weight', dest='target_weight',
+                        action='store_true',
+                        help='Loss with target_weight')
+    # Data processing
+    parser.add_argument('-f', '--flip', dest='flip', action='store_true',
+                        help='flip the input during validation')
+    parser.add_argument('--sigma', type=float, default=1,
+                        help='Groundtruth Gaussian sigma.')
+    parser.add_argument('--sigma-decay', type=float, default=0,
+                        help='Sigma decay rate for each epoch.')
+
+    # Miscs
+    parser.add_argument('-c', '--checkpoint', default='checkpoint', type=str, metavar='PATH',
+                        help='path to save checkpoint (default: checkpoint)')
+    parser.add_argument('--snapshot', default=20, type=int,
+                        help='save models for every #snapshot epochs (default: 0)')
+    parser.add_argument('--resume', default='', type=str, metavar='PATH',
+                        help='path to latest checkpoint (default: none)')
+    parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
+                        help='evaluate model on validation set')
+    parser.add_argument('-d', '--debug', dest='debug', action='store_true',
+                        help='show intermediate results')
+    parser.add_argument('-w', '--write', dest='write', action='store_true',
+                        help='wirte acc / loss curve')
+    parser.add_argument('-t', '--test', dest='test', action='store_true',
+                        help='Use all data or just 10 actions')
+
+    # 2020.3.2 for relabel (only use once)
+    parser.add_argument('-r', '--relabel', dest='relabel', action='store_true',
+                        help='Use model prediction to relabel label')
+
+    # 2020.5.20
+    parser.add_argument('-m', '--mask',type=str, metavar='PATH',
+                    help='input mask path')
+    '''
+
+    #########################
+    # COCO_200
+    ###########################
+
+    parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
+    parser.add_argument('--dataset', metavar='DATASET', default='sad_coco_step_2_200',
+                        choices=dataset_names,
+                        help='Datasets: ' +
+                            ' | '.join(dataset_names) +
+                            ' (default: mpii)')
+    parser.add_argument('--image-path', default='/home/s5078345/Affordance-Detection-on-Video/dataset_coco', type=str,
+                        help='path to images')
+    parser.add_argument('--anno-path', default='', type=str,
+                        help='path to annotation (json)')
+    parser.add_argument('--year', default=2014, type=int, metavar='N',
+                        help='year of coco dataset: 2014 (default) | 2017)')
+
+
+    parser.add_argument('--inp-res', default=256, type=int,
+                        help='input resolution (default: 256)')
+    parser.add_argument('--out-res', default=64, type=int,
+                    help='output resolution (default: 64, to gen GT)')
+    # parser.add_argument('--inp-res', default=128, type=int,
+    #                     help='input resolution (default: 256)')
+    # parser.add_argument('--out-res', default=32, type=int,
+    #                 help='output resolution (default: 64, to gen GT)')
+
+                        
+    parser.add_argument('--dataset-list-dir-path', default='/home/s5078345/Affordance-Detection-on-Video/dataset_coco/data_list', type=str,
                     help='dir of train/test data list')
 
     # Model structure

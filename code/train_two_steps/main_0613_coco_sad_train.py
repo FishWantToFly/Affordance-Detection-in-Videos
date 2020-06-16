@@ -1,13 +1,17 @@
 '''
-just for pre-train on coco-dataset
-checkpoint : checkpoint_0605_coco_all_step_1
+when traning : 
+    coco -> remove TSM 
+    sad -> as usual 
+    two dataloader for training ? train_coco train_sad  
 
-
-learning rate should be higher than further training
-5e-4
 
 # training 
-python main_0605_coco_step_1.py
+python main_0613_coco_sad_train.py
+
+
+
+
+
 # training using only 10 actions (for test)
 python main_0605_coco_step_1.py -t 
 
@@ -19,10 +23,10 @@ python main.py --resume ./checkpoint/checkpoint_20.pth.tar -w
 python main.py --resume ./checkpoint/checkpoint_20.pth.tar -e -d 
 
 # relabel train/test (visualize in same architecture)
-python main_0605_coco_step_1.py --resume ./checkpoint_0605_coco_all_step_1/checkpoint_best_iou.pth.tar -e -r
+python main_0613_coco_sad_train.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
 
 # temp
-python main_0428.py --resume ./checkpoint_0428/checkpoint_best_iou.pth.tar -e
+python main_0613_coco_sad_train.py --resume ./checkpoint_0613_coco_sad_train/checkpoint_best_iou.pth.tar -e
 '''
 from __future__ import print_function, absolute_import
 
@@ -108,7 +112,7 @@ def draw_line_chart(args, log_read_dir):
     plt.savefig(os.path.join(args.checkpoint, 'log_iou.png'))
     plt.cla()
 
-def main(args):
+def main(args, args_coco):
     global best_iou
     global idx
     global output_res
@@ -213,7 +217,13 @@ def main(args):
         num_workers=args.workers, pin_memory=True
     )
 
-    
+    train_dataset_coco = datasets.__dict__[args_coco.dataset](is_train=True, **vars(args_coco)) #-> depend on args.dataset to replace with datasets
+    train_loader_coco = torch.utils.data.DataLoader(
+        train_dataset_coco,
+        batch_size=args_coco.train_batch, shuffle=True,
+        num_workers=args_coco.workers, pin_memory=True
+    )
+
     # for i, (input, input_depth, target, meta) in enumerate(train_loader):
     #     pass
     # return
@@ -266,9 +276,13 @@ def main(args):
         # decay sigma
         if args.sigma_decay > 0:
             train_loader.dataset.sigma *=  args.sigma_decay
+            train_loader_coco.dataset.sigma *=  args.sigma_decay
             val_loader.dataset.sigma *=  args.sigma_decay
 
         # train for one epoch
+        _ = train_coco(train_loader_coco, model, criterion, optimizer,
+                                      args.debug, args.flip)
+        
         train_loss = train(train_loader, model, criterion, optimizer,
                                       args.debug, args.flip)
 
@@ -295,6 +309,74 @@ def main(args):
 
     print("Best iou = %.3f" % (best_iou))
 
+def train_coco(train_loader, model, criterion, optimizer, debug=False, flip=True):
+    batch_time = AverageMeter()
+    data_time = AverageMeter()
+    losses = AverageMeter()
+
+    # switch to train mode
+    model.train()
+
+    end = time.time()
+
+    gt_win, pred_win = None, None
+    bar = Bar('Train', max=len(train_loader))
+    loss_ratio = 1
+
+    # coco
+    for i, (input, input_depth, target, meta) in enumerate(train_loader):
+
+        # measure data loading time
+        data_time.update(time.time() - end)
+
+        input, input_depth, target = input.to(device), input_depth.to(device), target.to(device, non_blocking=True)
+
+        batch_size = input.shape[0]
+        loss = 0
+        
+        # first compute
+        # 2020.6.5 remove TSM module now
+        for j in range(1):
+            input_now = input[:, j] # [B, 3, 256, 256]
+            input_depth_now = input_depth[:, j]
+            target_now = target[:, j]
+            output, out_tsm_feature = model(torch.cat((input_now, input_depth_now), 1)) # [B, 4, 256, 256]
+
+            if type(output) == list:  # multiple output # beacuse of intermediate prediction
+                for o in output:
+                    loss += criterion(o, target_now) * loss_ratio
+                output = output[-1]
+            else:  # single output
+                pass
+                # loss = criterion(output, target, target_weight)
+
+        # # measure accuracy and record loss
+        losses.update(loss.item(), input.size(0))
+
+        # compute gradient and do SGD step
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # measure elapsed time
+        batch_time.update(time.time() - end)
+        end = time.time()
+
+        # plot progress
+        bar.suffix  = '({batch}/{size}) Data: {data:.6f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f}'.format(
+                    batch=i + 1,
+                    size=len(train_loader),
+                    data=data_time.val,
+                    bt=batch_time.val,
+                    total=bar.elapsed_td,
+                    eta=bar.eta_td,
+                    loss=losses.avg,
+                    )
+        bar.next()
+
+    bar.finish()
+    return losses.avg
+
 def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -317,14 +399,39 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
 
         batch_size = input.shape[0]
         loss = 0
+        # store first two stack feature # 2 = first and second stack, 6 = video length
+        video_feature_cache = torch.zeros(batch_size, 6, 2, 256, output_res, output_res)
         
-        # first compute
-        # 2020.6.5 remove TSM module now
-        for j in range(1):
+        with torch.no_grad():
+            # first compute
+            for j in range(6):
+                input_now = input[:, j] # [B, 3, 256, 256]
+                input_depth_now = input_depth[:, j]
+                target_now = target[:, j]
+                _, out_tsm_feature = model(torch.cat((input_now, input_depth_now), 1)) # [B, 4, 256, 256]
+                for k in range(2):
+                    video_feature_cache[:, j, k] = out_tsm_feature[k]
+
+            # TSM module
+            b, t, _, c, h, w = video_feature_cache.size()
+            fold_div = 8
+            fold = c // fold_div
+            new_tsm_feature = torch.zeros(batch_size, 6, 2, 256, output_res, output_res)
+            for j in range(2):
+                x = video_feature_cache[:, :, j]
+                temp = torch.zeros(batch_size, 6, 256, output_res, output_res)
+                temp[:, :-1, :fold] = x[:, 1:, :fold]  # shift left
+                temp[:, 1:, fold: 2 * fold] = x[:, :-1, fold: 2 * fold]  # shift right
+                temp[:, :, 2 * fold:] = x[:, :, 2 * fold:]  # not shift
+                new_tsm_feature[:, :, j] = temp
+
+        new_tsm_feature = new_tsm_feature.to(device)
+        # compute use TSM feature
+        for j in range(6):
             input_now = input[:, j] # [B, 3, 256, 256]
             input_depth_now = input_depth[:, j]
             target_now = target[:, j]
-            output, out_tsm_feature = model(torch.cat((input_now, input_depth_now), 1)) # [B, 4, 256, 256]
+            output, _ = model(torch.cat((input_now, input_depth_now), 1), True, new_tsm_feature[:, j])
 
             if type(output) == list:  # multiple output # beacuse of intermediate prediction
                 for o in output:
@@ -333,7 +440,7 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
             else:  # single output
                 pass
                 # loss = criterion(output, target, target_weight)
-
+        
         # # measure accuracy and record loss
         losses.update(loss.item(), input.size(0))
 
@@ -392,12 +499,38 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             loss = 0
             iou_list = []
 
+            # store first two stack feature # 2 = first and second stack, 6 = video length
+            video_feature_cache = torch.zeros(batch_size, 6, 2, 256, output_res, output_res)
+
             # first compute
-            for j in range(1):
+            for j in range(6):
                 input_now = input[:, j] # [B, 3, 256, 256]
                 input_depth_now = input_depth[:, j]
                 target_now = target[:, j]
-                output, out_tsm_feature = model(torch.cat((input_now, input_depth_now), 1)) # [B, 4, 256, 256]
+                _, out_tsm_feature = model(torch.cat((input_now, input_depth_now), 1)) # [B, 4, 256, 256]
+                for k in range(2):
+                    video_feature_cache[:, j, k] = out_tsm_feature[k]
+
+            # TSM module
+            b, t, _, c, h, w = video_feature_cache.size()
+            fold_div = 8
+            fold = c // fold_div
+            new_tsm_feature = torch.zeros(batch_size, 6, 2, 256, output_res, output_res)
+            for j in range(2):
+                x = video_feature_cache[:, :, j]
+                temp = torch.zeros(batch_size, 6, 256, output_res, output_res)
+                temp[:, :-1, :fold] = x[:, 1:, :fold]  # shift left
+                temp[:, 1:, fold: 2 * fold] = x[:, :-1, fold: 2 * fold]  # shift right
+                temp[:, :, 2 * fold:] = x[:, :, 2 * fold:]  # not shift
+                new_tsm_feature[:, :, j] = temp
+
+            new_tsm_feature = new_tsm_feature.to(device)
+            # compute use TSM feature
+            for j in range(6):
+                input_now = input[:, j] # [B, 3, 256, 256]
+                input_depth_now = input_depth[:, j]
+                target_now = target[:, j]
+                output, _ = model(torch.cat((input_now, input_depth_now), 1), True, new_tsm_feature[:, j])
 
                 if type(output) == list:  # multiple output # beacuse of intermediate prediction
                     for o in output:
@@ -405,7 +538,6 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                     output = output[-1]
                 else:  # single output
                     pass
-                    # loss = criterion(output, target, target_weight)
 
                 temp_iou = intersectionOverUnion(output.cpu(), target_now.cpu(), idx) # have not tested
                 iou_list.append(temp_iou)
@@ -495,13 +627,16 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-    parser.add_argument('--dataset', metavar='DATASET', default='sad_coco_step_1_8000',
+
+    parser.add_argument('--dataset', metavar='DATASET', default='sad_step_1',
                         choices=dataset_names,
                         help='Datasets: ' +
                             ' | '.join(dataset_names) +
                             ' (default: mpii)')
-    parser.add_argument('--image-path', default='/home/s5078345/Affordance-Detection-on-Video/dataset_coco', type=str,
+                            
+    parser.add_argument('--image-path', default='/home/s5078345/Affordance-Detection-on-Video/dataset_two_steps', type=str,
                         help='path to images')
+
     parser.add_argument('--anno-path', default='', type=str,
                         help='path to annotation (json)')
     parser.add_argument('--year', default=2014, type=int, metavar='N',
@@ -513,7 +648,7 @@ if __name__ == '__main__':
     parser.add_argument('--out-res', default=64, type=int,
                     help='output resolution (default: 64, to gen GT)')
                         
-    parser.add_argument('--dataset-list-dir-path', default='/home/s5078345/Affordance-Detection-on-Video/dataset_coco/data_list', type=str,
+    parser.add_argument('--dataset-list-dir-path', default='/home/s5078345/Affordance-Detection-on-Video/dataset_two_steps/data_list', type=str,
                     help='dir of train/test data list')
 
     # Model structure
@@ -537,7 +672,7 @@ if __name__ == '__main__':
                         help='optimizers')
     # parser.add_argument('-j', '--workers', default=1, type=int, metavar='N',
                         # help='number of data loading workers (default: 4)')
-    parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
+    parser.add_argument('-j', '--workers', default=3, type=int, metavar='N',
                         help='number of data loading workers (default: 4)')
     parser.add_argument('--epochs', default=181, type=int, metavar='N',
                         help='number of total epochs to run')
@@ -545,14 +680,11 @@ if __name__ == '__main__':
                         help='manual epoch number (useful on restarts)')
 
     # 1 GPU setting
-    # parser.add_argument('--train-batch', default=20, type=int, metavar='N', 
-    #                     help='train batchsize')
-    # parser.add_argument('--test-batch', default=20, type=int, metavar='N',
-    #                     help='train batchsize')
+
     # 2 GPU setting
-    parser.add_argument('--train-batch', default=40, type=int, metavar='N', 
+    parser.add_argument('--train-batch', default=8, type=int, metavar='N', 
                         help='train batchsize')
-    parser.add_argument('--test-batch', default=40, type=int, metavar='N',
+    parser.add_argument('--test-batch', default=8, type=int, metavar='N',
                         help='train batchsize')
 
     parser.add_argument('--lr', '--learning-rate', default=5e-4, type=float,
@@ -596,4 +728,112 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--relabel', dest='relabel', action='store_true',
                         help='Use model prediction to relabel label')
 
-    main(parser.parse_args())
+
+    ######################
+    # ***
+    #######################
+
+    # another parser for coco
+
+    parser_coco = argparse.ArgumentParser(description='PyTorch ImageNet Training')
+
+    parser_coco.add_argument('--dataset', metavar='DATASET_COCO', default='sad_coco_step_1_8000', # 2020.6.13 new add
+                        choices=dataset_names,
+                        help='Datasets: ' +
+                            ' | '.join(dataset_names) +
+                            ' (default: mpii)')
+                            
+    parser_coco.add_argument('--image-path', default='/home/s5078345/Affordance-Detection-on-Video/dataset_coco', type=str,
+                        help='path to images')
+
+    parser_coco.add_argument('--anno-path', default='', type=str,
+                        help='path to annotation (json)')
+    parser_coco.add_argument('--year', default=2014, type=int, metavar='N',
+                        help='year of coco dataset: 2014 (default) | 2017)')
+
+
+    parser_coco.add_argument('--inp-res', default=256, type=int,
+                        help='input resolution (default: 256)')
+    parser_coco.add_argument('--out-res', default=64, type=int,
+                    help='output resolution (default: 64, to gen GT)')
+                        
+    parser_coco.add_argument('--dataset-list-dir-path', default='/home/s5078345/Affordance-Detection-on-Video/dataset_coco/data_list', type=str,
+                    help='dir of train/test data list')
+
+    # Model structure
+    parser_coco.add_argument('--arch', '-a', metavar='ARCH', default='hg',
+                        choices=model_names,
+                        help='model architecture: ' +
+                            ' | '.join(model_names) +
+                            ' (default: hg)')
+    parser_coco.add_argument('-s', '--stacks', default=4, type=int, metavar='N',
+                        help='Number of hourglasses to stack')
+    parser_coco.add_argument('--features', default=256, type=int, metavar='N',
+                        help='Number of features in the hourglass')
+    parser_coco.add_argument('--resnet-layers', default=50, type=int, metavar='N',
+                        help='Number of resnet layers',
+                        choices=[18, 34, 50, 101, 152])
+    parser_coco.add_argument('-b', '--blocks', default=1, type=int, metavar='N',
+                        help='Number of residual modules at each location in the hourglass')
+    # Training strategy
+    parser_coco.add_argument('--solver', metavar='SOLVER', default='adam',
+                        choices=['rms', 'adam'],
+                        help='optimizers')
+    # parser.add_argument('-j', '--workers', default=1, type=int, metavar='N',
+                        # help='number of data loading workers (default: 4)')
+    parser_coco.add_argument('-j', '--workers', default=3, type=int, metavar='N',
+                        help='number of data loading workers (default: 4)')
+    parser_coco.add_argument('--epochs', default=181, type=int, metavar='N',
+                        help='number of total epochs to run')
+    parser_coco.add_argument('--start-epoch', default=0, type=int, metavar='N',
+                        help='manual epoch number (useful on restarts)')
+
+    # 1 GPU setting
+    parser_coco.add_argument('--train-batch', default=40, type=int, metavar='N', 
+                        help='train batchsize')
+    parser_coco.add_argument('--test-batch', default=40, type=int, metavar='N',
+                        help='train batchsize')
+
+    parser_coco.add_argument('--lr', '--learning-rate', default=5e-5, type=float,
+                        metavar='LR', help='initial learning rate')
+    parser_coco.add_argument('--momentum', default=0, type=float, metavar='M',
+                        help='momentum')
+    parser_coco.add_argument('--weight-decay', '--wd', default=0, type=float,
+                        metavar='W', help='weight decay (default: 0)')
+    parser_coco.add_argument('--schedule', type=int, nargs='+', default=[50, 80],
+                        help='Decrease learning rate at these epochs.')
+    parser_coco.add_argument('--gamma', type=float, default=0.1,
+                        help='LR is multiplied by gamma on schedule.')
+    parser_coco.add_argument('--target-weight', dest='target_weight',
+                        action='store_true',
+                        help='Loss with target_weight')
+    # Data processing
+    parser_coco.add_argument('-f', '--flip', dest='flip', action='store_true',
+                        help='flip the input during validation')
+    parser_coco.add_argument('--sigma', type=float, default=1,
+                        help='Groundtruth Gaussian sigma.')
+    parser_coco.add_argument('--sigma-decay', type=float, default=0,
+                        help='Sigma decay rate for each epoch.')
+
+    # Miscs
+    parser_coco.add_argument('-c', '--checkpoint', default='checkpoint', type=str, metavar='PATH',
+                        help='path to save checkpoint (default: checkpoint)')
+    parser_coco.add_argument('--snapshot', default=20, type=int,
+                        help='save models for every #snapshot epochs (default: 0)')
+    parser_coco.add_argument('--resume', default='', type=str, metavar='PATH',
+                        help='path to latest checkpoint (default: none)')
+    parser_coco.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
+                        help='evaluate model on validation set')
+    parser_coco.add_argument('-d', '--debug', dest='debug', action='store_true',
+                        help='show intermediate results')
+    parser_coco.add_argument('-w', '--write', dest='write', action='store_true',
+                        help='wirte acc / loss curve')
+    parser_coco.add_argument('-t', '--test', dest='test', action='store_true',
+                        help='Use all data or just 10 actions')
+
+    # 2020.3.2 for relabel (only use once)
+    parser_coco.add_argument('-r', '--relabel', dest='relabel', action='store_true',
+                        help='Use model prediction to relabel label')
+
+
+    main(parser.parse_args(), parser_coco.parse_args())

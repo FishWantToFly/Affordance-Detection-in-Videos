@@ -1,4 +1,5 @@
 '''
+Train step 1 on sad dataset.
 
 # training 
 python main_0428.py
@@ -9,6 +10,12 @@ python main.py -t
 python main_0428.py --resume ./checkpoint_0605_coco_all_step_1/checkpoint_best_iou.pth.tar
 # resume pre-training from checkpoint
 python main_0428.py --resume ./checkpoint_0605_coco_all_step_1/checkpoint_best_iou.pth.tar -p
+
+python main_0428.py --resume ./checkpoint_0612_8000_to_200/checkpoint_best_iou.pth.tar -p
+
+
+
+
 
 
 # draw line chart (loss and IoU curve)
@@ -138,15 +145,16 @@ def main(args):
         return
 
     # idx is the index of joints used to compute accuracy
-    if args.dataset in ['mpii', 'lsp']:
-        idx = [1,2,3,4,5,6,11,12,15,16]
-    elif args.dataset == 'coco':
-        idx = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]
-    elif args.dataset == 'sad' or args.dataset == 'sad_step_1':
-        idx = [1] # support affordance
-    else:
-        print("Unknown dataset: {}".format(args.dataset))
-        assert False
+    # if args.dataset in ['mpii', 'lsp']:
+    #     idx = [1,2,3,4,5,6,11,12,15,16]
+    # elif args.dataset == 'coco':
+    #     idx = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]
+    # elif args.dataset == 'sad' or args.dataset == 'sad_step_1':
+    #     idx = [1] # support affordance
+    # else:
+    #     print("Unknown dataset: {}".format(args.dataset))
+    #     assert False
+    idx = [1]
 
     # create checkpoint dir
     if not isdir(args.checkpoint):
@@ -181,14 +189,14 @@ def main(args):
                                         momentum=args.momentum,
                                         weight_decay=args.weight_decay)
     elif args.solver == 'adam':
-        # optimizer = torch.optim.Adam(
-        #     model.parameters(),
-        #     lr=args.lr,
-        # )
         optimizer = torch.optim.Adam(
-            filter(lambda p: p.requires_grad, model.parameters()),
+            model.parameters(),
             lr=args.lr,
         )
+        # optimizer = torch.optim.Adam(
+        #     filter(lambda p: p.requires_grad, model.parameters()),
+        #     lr=args.lr,
+        # )
     else:
         print('Unknown solver: {}'.format(args.solver))
         assert False
@@ -623,16 +631,16 @@ if __name__ == '__main__':
                         help='manual epoch number (useful on restarts)')
 
     # 2 GPU setting
-    # parser.add_argument('--train-batch', default=8, type=int, metavar='N',
-                        # help='train batchsize')
-    # parser.add_argument('--test-batch', default=8, type=int, metavar='N',
-                        # help='train batchsize')
-
-
-    parser.add_argument('--train-batch', default=4, type=int, metavar='N',
+    parser.add_argument('--train-batch', default=8, type=int, metavar='N',
                         help='train batchsize')
-    parser.add_argument('--test-batch', default=4, type=int, metavar='N',
+    parser.add_argument('--test-batch', default=8, type=int, metavar='N',
                         help='train batchsize')
+
+    # 1 GPU setting
+    # parser.add_argument('--train-batch', default=4, type=int, metavar='N',
+    #                     help='train batchsize')
+    # parser.add_argument('--test-batch', default=4, type=int, metavar='N',
+    #                     help='train batchsize')
 
 
     parser.add_argument('--lr', '--learning-rate', default=2e-4, type=float,
