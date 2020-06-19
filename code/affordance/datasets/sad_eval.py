@@ -73,7 +73,7 @@ class Sad_eval(data.Dataset):
             semantic_label = self.semantic_dict[semantic_name]
 
             # print(action.split('/')[2:])
-            input_action_path = ('/').join(action.split('/')[2:])
+            input_action_path = ('/').join(action.split('/')[1:])
 
             # for video training
             # each time there are 6 feames, overlap = 2 frames
@@ -97,7 +97,7 @@ class Sad_eval(data.Dataset):
                     gt_mask = os.path.join(frame_dir_dir, gt_mask_dir_name, frame_name[:-4] + '.jpg')
                 
                     input_mask = os.path.join(self.input_mask_dir, input_action_path, frame_name[:-4] + '.jpg')
-                    
+
                     # frame_dir_dir : /home/s5078345/Affordance-Detection-on-Video/dataset_two_steps/./dataset_original/home_living_room/chair_2_angle_2/remove_object_on_it_1
                     # NEED TO FIND CLASSIFICATION GT FROM dataset_original mask and mask_rgb
                     # if mask_rgb None : false. if mask_rgb exists image : true

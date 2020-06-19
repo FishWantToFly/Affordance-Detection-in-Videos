@@ -314,9 +314,17 @@ def eval_image_plus_mask(img, mask, mode):
     return img
 
 def eval_heatmap(inp, out):
-    # inp [480, 640, 3]
-    # out [480, 640]
+    '''
+    Input :
+        inp (input image) : [H, W, 3]
+    '''
+    # inp [480, 640, 3] uint8
+    # out [480, 640] uint8
 
+    # print(inp)
+    # print(inp.shape)
+
+    # print(out)
     # print(out.shape)
     inp = np.array(Image.fromarray(inp).resize((256, 256))) # [256, 256, 3]
     out = np.array(Image.fromarray(out).resize((256, 256))) # [256, 256]

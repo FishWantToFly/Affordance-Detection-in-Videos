@@ -1,7 +1,6 @@
 '''
-2020.5.20  
-Evaluate step 2 in two_steps 
-Use predicte masks as input to evaluate 
+2020.6.16
+Step 2 annotation for 200 coco dataset
 '''
 
 from __future__ import print_function, absolute_import
@@ -21,7 +20,7 @@ from affordance.utils.imutils import *
 from affordance.utils.transforms import *
 
 
-class Sad_step_2_eval(data.Dataset):
+class Sad_coco_step_2_200(data.Dataset):
     def __init__(self, is_train = True, **kwargs):
         self.img_folder = kwargs['image_path'] # root image folders
         self.is_train   = is_train # training set or test set
@@ -30,11 +29,6 @@ class Sad_step_2_eval(data.Dataset):
         self.sigma      = kwargs['sigma']
         self.dataset_list_dir_path = kwargs['dataset_list_dir_path']
         self.input_mask_dir = kwargs['mask']
-
-        self.semantic_dict = {'basket': 0, 'chair': 1, 'plate': 2, 'sofa': 3, 'table': 4}
-        self.semantic_len = len(self.semantic_dict)
-
-        # contain img and annotation
 
         if kwargs['relabel']: # for relabel / visualization
             self.train_list = self.load_full_file_list('test_list') # dummy
@@ -60,73 +54,46 @@ class Sad_step_2_eval(data.Dataset):
                 action_list.append(inner_list[0])
 
         image_dir_name = 'raw_frames'
-        # mask_dir_name = 'mask' # gt_mask_dir  #### ???? -> first_mask
-        check_mask_dir_name = 'mask'
-        mask_dir_name = 'first_mask' 
-        depth_dir_name = 'inpaint_depth'
-        mask_rgb_dir_name = 'mask_rgb'
+
         for action in action_list :
+            temp = [] 
             action_rgb_frames = glob.glob(os.path.join(self.img_folder, action, image_dir_name, '*.png'))
-            semantic_name = os.path.basename(os.path.dirname(action)).split('_')[0]
-            semantic_label = self.semantic_dict[semantic_name]
-
-            input_action_path = ('/').join(action.split('/')[1:])
-            # print(input_action_path)
-
-            # for video training
-            # each time there are 6 feames, overlap = 2 frames
+            input_action_path = ('/').join(action.split('/')[2:])
             sorted_action_rgb_frames = sorted(action_rgb_frames)
-            start_frame = -4 # -> 0
+
+            frame = sorted_action_rgb_frames[0] 
+            frame_name = os.path.basename(frame)
+            frame_dir_dir = os.path.dirname(os.path.dirname(frame))
+            affordance_dir = os.path.basename(os.path.dirname(frame_dir_dir))
+
+            print(frame)
+            print(affordance_dir)
+
+            depth = None
+
+            ## USE GT MASK HERE
+            input_mask = os.path.join(self.input_mask_dir, input_action_path, frame_name[:-4] + '.jpg')
+            print(input_action_path)
+            print(input_mask)
+            print()
+
+            affordance_label = None
+            if affordance_dir == 'support_true' :
+                affordance_label = True
+            elif affordance_dir == 'support_false' :
+                affordance_label = False 
+            else :
+                print("Mask got wrong QQ")
+
+            _index = 0
+            temp.append([frame, input_mask, depth, affordance_label, _index]) # use pred mask as input
             
-            while (True) :
-                start_frame += 4
-                if (start_frame + 6) >= len(action_rgb_frames):
-                    start_frame = (len(action_rgb_frames)) - 6
+            all_files.append(temp)
 
-                temp = [] 
-                for i in range(6):
-                    _index = start_frame + i
-                    frame = sorted_action_rgb_frames[start_frame + i] 
-                    frame_name = os.path.basename(frame)
-                    frame_dir_dir = os.path.dirname(os.path.dirname(frame))
-                    # here can use gt mask of predcited mask
-                    # gt_mask = os.path.join(frame_dir_dir, mask_dir_name, frame_name[:-4] + '.jpg')
-                    check_mask = os.path.join(frame_dir_dir, check_mask_dir_name, frame_name[:-4] + '.jpg')
-                    depth = os.path.join(frame_dir_dir, depth_dir_name, frame_name[:-4] + '.npy')
-
-
-                    ## start from here !!!!
-                    input_mask = os.path.join(self.input_mask_dir, input_action_path, frame_name[:-4] + '.jpg')
-
-                    # frame_dir_dir : /home/s5078345/Affordance-Detection-on-Video/dataset_two_steps/./dataset_original/home_living_room/chair_2_angle_2/remove_object_on_it_1
-                    # NEED TO FIND CLASSIFICATION GT FROM dataset_original mask and mask_rgb
-                    # if mask_rgb None : false. if mask_rgb exists image : true
-                    origin_dataset_name = 'dataset_original'
-                    temp_1 = ('/').join(frame_dir_dir.split('/')[0:6])
-                    temp_2 = ('/').join(frame_dir_dir.split('/')[7:])
-                    origin_frame_dir_dir = os.path.join(temp_1, origin_dataset_name, temp_2)
-                    mask_rgb = os.path.join(frame_dir_dir, mask_rgb_dir_name, frame_name[:-4] + '.jpg')
-
-                    affordance_label = None
-                    if os.path.exists(check_mask) and os.path.exists(mask_rgb) :
-                        affordance_label = True
-                    elif os.path.exists(check_mask) and not os.path.exists(mask_rgb) :
-                        affordance_label = False 
-                    else :
-                        print("Mask got wrong QQ")
-
-                    # temp.append([frame, gt_mask, depth, affordance_label, _index])　# use gt mask as input
-                    temp.append([frame, input_mask, depth, affordance_label, _index]) # use pred mask as input
-                    
-                all_files.append(temp)
-
-                # reach the end
-                if (start_frame + 6) == len(action_rgb_frames):
-                    break
         return all_files
     
     def __getitem__(self, index):
-        video_len = 6
+        video_len = 1
         mask_path_list = []
         image_index_list = []
 
@@ -168,14 +135,15 @@ class Sad_step_2_eval(data.Dataset):
             # load image and mask
             img = load_image(img_path)  # CxHxW
             a = load_mask(mask_path)    # 1xHxW
-            depth = load_depth(depth_path)
+            # depth = load_depth(depth_path)
             
             nparts = 1 # should change if target is more than 2
 
             # Prepare image and groundtruth map
             # inp = crop(img, c, s, [self.inp_res, self.inp_res], rot=r)
             inp = resize(img, self.inp_res, self.inp_res) # get normalized rgb value
-            input_depth = resize(depth, self.inp_res, self.inp_res)
+            # input_depth = resize(depth, self.inp_res, self.inp_res)
+            input_depth = torch.zeros(1, self.inp_res, self.inp_res) # no meaning
             # Generate input mask
             input_mask = torch.zeros(nparts, self.inp_res, self.inp_res) # [1, out_res, out_res]
             _input_mask = a[0] # HxW
@@ -201,7 +169,7 @@ class Sad_step_2_eval(data.Dataset):
             ##############################################
             # Output
             video_input[i] = inp
-            video_input_depth[i] = input_depth
+            # video_input_depth[i] = input_depth
             video_input_mask[i] = input_mask
             if affordance_label == True :
                 video_target_label[i] = torch.tensor([1.])
@@ -260,7 +228,7 @@ class Sad_step_2_eval(data.Dataset):
         else:
             return len(self.valid_list)
 
-def sad_step_2_eval(**kwargs):
-    return Sad_step_2_eval(**kwargs)
+def sad_coco_step_2_200(**kwargs):
+    return Sad_coco_step_2_200(**kwargs)
 
-sad_step_2_eval.njoints = 1  # ugly but works
+sad_coco_step_2_200.njoints = 1  # ugly but works

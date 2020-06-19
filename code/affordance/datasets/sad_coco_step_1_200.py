@@ -1,6 +1,8 @@
 '''
 2020.6.5 step 1 for coco dataset 
 just provide one image per action
+
+train / test_list : 200 images
 '''
 
 from __future__ import print_function, absolute_import
@@ -19,7 +21,7 @@ from affordance.utils.osutils import *
 from affordance.utils.imutils import *
 from affordance.utils.transforms import *
 
-class Sad_coco_step_1(data.Dataset):
+class Sad_coco_step_1_200(data.Dataset):
     def __init__(self, is_train = True, **kwargs):
         self.img_folder = kwargs['image_path'] # root image folders
         self.is_train   = is_train # training set or test set
@@ -32,7 +34,7 @@ class Sad_coco_step_1(data.Dataset):
 
         if kwargs['relabel']: # for relabel / visualization
             self.train_list = self.load_full_file_list('test_list') # dummy
-            self.valid_list = self.load_full_file_list('original_data_list')
+            self.valid_list = self.load_full_file_list('test_list')
 
         elif kwargs['test'] == True:
             self.train_list = self.load_full_file_list('train_list_10')
@@ -43,8 +45,8 @@ class Sad_coco_step_1(data.Dataset):
             # self.valid_list = self.load_full_file_list('test_list')
 
             # about 8000 images
-            self.train_list = self.load_full_file_list('train_list_v1')
-            self.valid_list = self.load_full_file_list('test_list_v1')
+            self.train_list = self.load_full_file_list('train_list')
+            self.valid_list = self.load_full_file_list('test_list')
             print("Train set number : %d" % len(self.train_list))
             print("Test set number : %d" % len(self.valid_list))
 
@@ -91,7 +93,7 @@ class Sad_coco_step_1(data.Dataset):
             video_data = self.valid_list[index]
 
         video_input = torch.zeros(video_len, 3, self.inp_res, self.inp_res)
-        video_input_depth = torch.zeros(video_len, 1, self.inp_res, self.inp_res)
+        video_input_depth = torch.zeros(video_len, 1, self.inp_res, self.inp_res) # depth information is null
         video_target = torch.zeros(video_len, 1, self.out_res, self.out_res)
 
         # Occlusion Preprocess (same occlusion for one action)
@@ -208,7 +210,7 @@ class Sad_coco_step_1(data.Dataset):
         else:
             return len(self.valid_list)
 
-def sad_coco_step_1(**kwargs):
-    return Sad_coco_step_1(**kwargs)
+def sad_coco_step_1_200(**kwargs):
+    return Sad_coco_step_1_200(**kwargs)
 
-sad_coco_step_1.njoints = 1  # ugly but works
+sad_coco_step_1_200.njoints = 1  # ugly but works
