@@ -23,7 +23,7 @@ python main.py --resume ./checkpoint/checkpoint_20.pth.tar -w
 python main.py --resume ./checkpoint/checkpoint_20.pth.tar -e -d 
 
 # relabel train/test (visualize in same architecture)
-python main_0613_coco_sad_train.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
+python main_0613_coco_sad_train.py --resume ./checkpoint_0613_coco_sad_train/checkpoint_best_iou.pth.tar -e -r
 
 # temp
 python main_0613_coco_sad_train.py --resume ./checkpoint_0613_coco_sad_train/checkpoint_best_iou.pth.tar -e
@@ -37,7 +37,7 @@ import matplotlib.pyplot as plt
 import random
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 import torch
 import torch.nn.parallel
@@ -548,7 +548,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                     raw_mask_path = meta['mask_path_list'][j][0]
                     img_index = meta['image_index_list'][j][0]
                     temp_head = ('/').join(raw_mask_path.split('/')[:-8])
-                    temp_tail = ('/').join(raw_mask_path.split('/')[-5:])
+                    temp_tail = ('/').join(raw_mask_path.split('/')[-6:])
                     temp = os.path.join(temp_head, 'code/train_two_steps', checkpoint, 'pred_vis', temp_tail)
                     relabel_mask_dir, relabel_mask_name = os.path.split(temp)
                     relabel_mask_dir = os.path.dirname(relabel_mask_dir)

@@ -5,7 +5,6 @@ Use predicte masks as input to evaluate
 # temp
 python main_eval_step_2.py --resume ./checkpoint_0514_add_depth/checkpoint_best_iou.pth.tar --mask ./checkpoint_0428/pred_vis -e
 
-python main_eval_step_2.py --resume ./checkpoint/checkpoint_best_iou.pth.tar --mask ./checkpoint_0428/pred_vis -e
 '''
 from __future__ import print_function, absolute_import
 
@@ -264,7 +263,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                 if j == 0:
                     output, last_state = model(torch.cat((input_now, input_depth_now, input_mask_now), 1))
                 else : 
-                    output, _ = model(torch.cat((input_now, input_depth_now, input_mask_now), 1), input_last_state = last_state)
+                    output, _ = model(torch.cat((input_now, input_depth_now, input_mask_now), 1))
                     # print(output.shape)
 
                 round_output = torch.round(output).float()

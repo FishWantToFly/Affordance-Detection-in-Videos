@@ -22,6 +22,8 @@ python main_0428.py --resume ./checkpoint_0612_8000_to_200/checkpoint_best_iou.p
 python main.py --resume ./checkpoint/checkpoint_20.pth.tar -w
 
 # relabel train/test (visualize in same architecture)
+python main_0428.py --resume ./checkpoint_0428/checkpoint_best_iou.pth.tar -e -r
+
 python main_0428.py --resume ./checkpoint_0606_coco_fine_tune_step_1/checkpoint_best_iou.pth.tar -e -r
 
 # temp
@@ -450,7 +452,8 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
     bar = Bar('Eval ', max=len(val_loader))
     with torch.no_grad():
         for i, (input, input_depth, target, meta) in enumerate(val_loader):
-            # if RELABEL and i == 10 : break
+            # if RELABEL and i == 2 : break
+
             # measure data loading time
             data_time.update(time.time() - end)
 
@@ -512,7 +515,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                     raw_mask_path = meta['mask_path_list'][j][0]
                     img_index = meta['image_index_list'][j][0]
                     temp_head = ('/').join(raw_mask_path.split('/')[:-8])
-                    temp_tail = ('/').join(raw_mask_path.split('/')[-5:])
+                    temp_tail = ('/').join(raw_mask_path.split('/')[-6:])
                     temp = os.path.join(temp_head, 'code/train_two_steps', checkpoint, 'pred_vis', temp_tail)
                     relabel_mask_dir, relabel_mask_name = os.path.split(temp)
                     relabel_mask_dir = os.path.dirname(relabel_mask_dir)

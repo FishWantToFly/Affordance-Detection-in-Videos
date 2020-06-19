@@ -4,7 +4,7 @@ Step 1 output is pre-generated (from args.mask)
 
 python main_eval.py --mask ./checkpoint_0428/pred_vis --resume ./checkpoint_0523_input_pred_mask/checkpoint_best_iou.pth.tar -e
 
-python main_eval.py --mask ./checkpoint_0428/pred_vis --resume ./checkpoint_0523_input_pred_mask/checkpoint_best_iou.pth.tar -e -r
+python main_eval.py --mask ./checkpoint_0613_coco_sad_train/pred_vis --resume ./checkpoint_0616_stateless/checkpoint_best_iou.pth.tar -e
 '''
 from __future__ import print_function, absolute_import
 
@@ -13,6 +13,8 @@ import argparse
 import time
 import matplotlib.pyplot as plt
 import random
+
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 import torch
 import torch.nn.parallel
@@ -36,7 +38,7 @@ from sklearn.metrics import accuracy_score
 
 
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1'
+
 
 # get model names and dataset names
 model_names = sorted(name for name in models.__dict__

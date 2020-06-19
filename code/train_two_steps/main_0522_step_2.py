@@ -19,7 +19,7 @@ python main.py --resume ./checkpoint/checkpoint_20.pth.tar -e -d
 python main.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
 
 # temp
-python main_0522_step_2.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
+python main_0522_step_2.py --mask ./checkpoint_0428/pred_vis --resume ./checkpoint_0523_input_pred_mask/checkpoint_best_iou.pth.tar -e
 '''
 from __future__ import print_function, absolute_import
 
@@ -208,14 +208,14 @@ def main(args):
         num_workers=args.workers, pin_memory=True
     )
 
-    '''
-    for i, (input, input_mask, target, meta) in enumerate(train_loader):
-        print(len(input))
-        print(input[0].shape)
-        print(input_mask[0].shape)
-        print(target[0].shape)
-        return
-    '''
+    
+    # for i, (input, input_depth, input_mask, target, meta) in enumerate(train_loader):
+    #     print(len(input))
+    #     print(input[0].shape)
+    #     print(input_mask[0].shape)
+    #     print(target[0].shape)
+    #     return
+    
 
     val_dataset = datasets.__dict__[args.dataset](is_train=False, **vars(args))
     val_loader = torch.utils.data.DataLoader(
@@ -558,7 +558,7 @@ if __name__ == '__main__':
     parser.add_argument('--test-batch', default=14, type=int, metavar='N',
                         help='train batchsize')
 
-    parser.add_argument('--lr', '--learning-rate', default=2e-5, type=float,
+    parser.add_argument('--lr', '--learning-rate', default=3e-5, type=float,
                         metavar='LR', help='initial learning rate')
     parser.add_argument('--momentum', default=0, type=float, metavar='M',
                         help='momentum')
