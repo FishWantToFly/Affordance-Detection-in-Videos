@@ -1,3 +1,4 @@
+./dataset_original/lab/chair_2/change_nothing
 ./dataset_original/home_living_room/chair_1/people_stand_up_from_it
 ./dataset_original/home_living_room/chair_1/put_object_on_it_1
 ./dataset_original/home_living_room/chair_1/put_object_on_it_2
