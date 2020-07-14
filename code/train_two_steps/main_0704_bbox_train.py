@@ -1,33 +1,18 @@
 '''
+Copy from main_0428.py
+
 Train step 1 on sad dataset.
 
-# training 
-python main_0428.py
-# training using only 10 actions (for test)
-python main.py -t 
+Use detecion result to crop image, and use it to feed into hg model
 
-# resume training from checkpoint
-python main_0428.py --resume ./checkpoint_0605_coco_all_step_1/checkpoint_best_iou.pth.tar
-# resume pre-training from checkpoint
-python main_0428.py --resume ./checkpoint_0605_coco_all_step_1/checkpoint_best_iou.pth.tar -p
+Use dataset_
 
-python main_0428.py --resume ./checkpoint_0612_8000_to_200/checkpoint_best_iou.pth.tar -p
-
-
-
-
-
-
-# draw line chart (loss and IoU curve)
-python main.py --resume ./checkpoint/checkpoint_20.pth.tar -w
 
 # relabel train/test (visualize in same architecture)
-python main_0428.py --resume ./checkpoint_0428/checkpoint_best_iou.pth.tar -e -r
+python main_0704_bbox_train.py --resume ./checkpoint_0428/checkpoint_best_iou.pth.tar -e -r
 
-python main_0428.py --resume ./checkpoint_0606_coco_fine_tune_step_1/checkpoint_best_iou.pth.tar -e -r
+python main_0704_bbox_train.py --resume ./checkpoint_0704_bbox_train/checkpoint_best_iou.pth.tar -e -r
 
-# temp
-python main_0428.py --resume ./checkpoint_0606_coco_fine_tune_step_1/checkpoint_best_iou.pth.tar -e
 '''
 from __future__ import print_function, absolute_import
 
@@ -35,7 +20,7 @@ import os
 import argparse
 import time
 import matplotlib.pyplot as plt
-import random
+import random, math
 
 os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 
@@ -52,7 +37,7 @@ from affordance.utils.logger import Logger, savefig
 from affordance.utils.evaluation import accuracy, AverageMeter, final_preds, intersectionOverUnion
 from affordance.utils.misc import save_checkpoint, save_pred, adjust_learning_rate
 from affordance.utils.osutils import mkdir_p, isfile, isdir, join
-from affordance.utils.imutils import batch_with_heatmap, sample_test, relabel_heatmap
+from affordance.utils.imutils import batch_with_heatmap, sample_test, relabel_heatmap, faster_rcnn_crop
 from affordance.utils.transforms import fliplr, flip_back
 import affordance.models as models
 import affordance.datasets as datasets
@@ -131,6 +116,7 @@ def main(args):
 
     if args.resume != '' and args.pre_train == False:
         args.checkpoint = ('/').join(args.resume.split('/')[:2])
+
     if args.relabel == True:
         args.test_batch = 1
     if args.test == True:
@@ -139,7 +125,7 @@ def main(args):
         args.epochs = 20
 
     if args.evaluate and args.relabel == False:
-        args.test_batch = 10
+        args.test_batch = 1
 
     # write line-chart and stop program
     if args.write: 
@@ -254,14 +240,15 @@ def main(args):
         num_workers=args.workers, pin_memory=True
     )
 
-    '''
-    for i, (input, input_depth, target, meta) in enumerate(train_loader):
-        print(len(input))
-        print(input[0].shape)
-        print(input_depth[0].shape)
-        print(target[0].shape)
-        return
-    '''
+    
+    # for i, (input, input_depth, target, meta) in enumerate(train_loader):
+        # pass
+        # print(len(input))
+        # print(input[0].shape)
+        # print(input_depth[0].shape)
+        # print(target[0].shape)
+    # return
+    
     
 
     val_dataset = datasets.__dict__[args.dataset](is_train=False, **vars(args))
@@ -277,7 +264,8 @@ def main(args):
         RELABEL = True
         if args.evaluate:
             print('\nRelabel val label')
-            loss, iou, predictions = validate(val_loader, model, criterion, njoints,
+
+            loss, iou, predictions = validate_v2(val_loader, model, criterion, njoints,
                                     args.checkpoint, args.debug, args.flip)
             # Because test and val are all considered -> iou is uesless
             # print("Val IoU: %.3f" % (iou))
@@ -291,7 +279,8 @@ def main(args):
         if args.debug :
             print('Draw pred /gt heatmap')
         JUST_EVALUATE = True
-        loss, iou, predictions = validate(val_loader, model, criterion, njoints,
+
+        loss, iou, predictions = validate_v2(val_loader, model, criterion, njoints,
                                            args.checkpoint, args.debug, args.flip)
         print("Val IoU: %.3f" % (iou))
         return
@@ -300,13 +289,13 @@ def main(args):
     code_backup_dir = 'code_backup'
     mkdir_p(os.path.join(args.checkpoint, code_backup_dir))
     os.system('cp ../affordance/models/hourglass.py %s/%s/hourglass.py' % (args.checkpoint, code_backup_dir))
-    os.system('cp ../affordance/datasets/sad.py %s/%s/sad.py' % (args.checkpoint, code_backup_dir))
+    os.system('cp ../affordance/datasets/sad_faster_rcnn_step_1.py %s/%s/sad_faster_rcnn_step_1.py' % (args.checkpoint, code_backup_dir))
     this_file_name = os.path.split(os.path.abspath(__file__))[1]
     os.system('cp ./%s %s' % (this_file_name, os.path.join(args.checkpoint, code_backup_dir, this_file_name)))
 
     # train and eval
     lr = args.lr
-    for epoch in range(args.start_epoch, args.epochs):        
+    for epoch in range(args.start_epoch, args.epochs):
         lr = adjust_learning_rate(optimizer, epoch, lr, args.schedule, args.gamma)
         print('\nEpoch: %d | LR: %.8f' % (epoch + 1, lr))
 
@@ -318,6 +307,8 @@ def main(args):
         # train for one epoch
         train_loss = train(train_loader, model, criterion, optimizer,
                                       args.debug, args.flip)
+        
+
 
         # evaluate on validation set
         valid_loss, valid_iou, predictions = validate(val_loader, model, criterion,
@@ -365,47 +356,22 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
 
         batch_size = input.shape[0]
         loss = 0
-        # store first two stack feature # 2 = first and second stack, 6 = video length
-        video_feature_cache = torch.zeros(batch_size, 6, 2, 256, output_res, output_res)
-        
-        with torch.no_grad():
-            # first compute
-            for j in range(6):
-                input_now = input[:, j] # [B, 3, 256, 256]
-                input_depth_now = input_depth[:, j]
-                target_now = target[:, j]
-                _, out_tsm_feature = model(torch.cat((input_now, input_depth_now), 1)) # [B, 4, 256, 256]
-                for k in range(2):
-                    video_feature_cache[:, j, k] = out_tsm_feature[k]
 
-            # TSM module
-            b, t, _, c, h, w = video_feature_cache.size()
-            fold_div = 8
-            fold = c // fold_div
-            new_tsm_feature = torch.zeros(batch_size, 6, 2, 256, output_res, output_res)
-            for j in range(2):
-                x = video_feature_cache[:, :, j]
-                temp = torch.zeros(batch_size, 6, 256, output_res, output_res)
-                temp[:, :-1, :fold] = x[:, 1:, :fold]  # shift left
-                temp[:, 1:, fold: 2 * fold] = x[:, :-1, fold: 2 * fold]  # shift right
-                temp[:, :, 2 * fold:] = x[:, :, 2 * fold:]  # not shift
-                new_tsm_feature[:, :, j] = temp
-
-        new_tsm_feature = new_tsm_feature.to(device)
         # compute use TSM feature
         for j in range(6):
-            input_now = input[:, j] # [B, 3, 256, 256]
-            input_depth_now = input_depth[:, j]
-            target_now = target[:, j]
-            output, _ = model(torch.cat((input_now, input_depth_now), 1), True, new_tsm_feature[:, j])
+            for obj_i in range(3):
+                input_now = input[:, j, obj_i] # [B, 3, 256, 256]
+                input_depth_now = input_depth[:, j, obj_i]
+                target_now = target[:, j, obj_i]
+                output, _ = model(torch.cat((input_now, input_depth_now), 1))
 
-            if type(output) == list:  # multiple output # beacuse of intermediate prediction
-                for o in output:
-                    loss += criterion(o, target_now)
-                output = output[-1]
-            else:  # single output
-                pass
-                # loss = criterion(output, target, target_weight)
+                if type(output) == list:  # multiple output # beacuse of intermediate prediction
+                    for o in output:
+                        loss += criterion(o, target_now)
+                    output = output[-1]
+                else:  # single output
+                    pass
+                    # loss = criterion(output, target, target_weight)
         
         # # measure accuracy and record loss
         losses.update(loss.item(), input.size(0))
@@ -433,7 +399,6 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
     bar.finish()
     return losses.avg
 
-
 def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False, flip=True):
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -451,7 +416,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
     end = time.time()
     bar = Bar('Eval ', max=len(val_loader))
     with torch.no_grad():
-        for i, (input, input_depth, target, meta) in enumerate(val_loader):
+        for i, (input, input_depth, target, meta, _, _, _, _) in enumerate(val_loader):
             if RELABEL and i == 1 : break
 
             # measure data loading time
@@ -465,99 +430,67 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             loss = 0
             iou_list = []
 
-            # store first two stack feature # 2 = first and second stack, 6 = video length
-            video_feature_cache = torch.zeros(batch_size, 6, 2, 256, output_res, output_res)
-
-            # first compute
             for j in range(6):
-                input_now = input[:, j] # [B, 3, 256, 256]
-                input_depth_now = input_depth[:, j]
-                target_now = target[:, j]
-                _, out_tsm_feature = model(torch.cat((input_now, input_depth_now), 1)) # [B, 4, 256, 256]
-                for k in range(2):
-                    video_feature_cache[:, j, k] = out_tsm_feature[k]
+                for obj_i in range(3):
+                    input_now = input[:, j, obj_i] # [B, 3, 256, 256]
+                    input_depth_now = input_depth[:, j, obj_i]
+                    target_now = target[:, j, obj_i]
+                    output, _ = model(torch.cat((input_now, input_depth_now), 1))
 
-            # TSM module
-            b, t, _, c, h, w = video_feature_cache.size()
-            fold_div = 8
-            fold = c // fold_div
-            new_tsm_feature = torch.zeros(batch_size, 6, 2, 256, output_res, output_res)
-            for j in range(2):
-                x = video_feature_cache[:, :, j]
-                temp = torch.zeros(batch_size, 6, 256, output_res, output_res)
-                temp[:, :-1, :fold] = x[:, 1:, :fold]  # shift left
-                temp[:, 1:, fold: 2 * fold] = x[:, :-1, fold: 2 * fold]  # shift right
-                temp[:, :, 2 * fold:] = x[:, :, 2 * fold:]  # not shift
-                new_tsm_feature[:, :, j] = temp
+                    if type(output) == list:  # multiple output # beacuse of intermediate prediction
+                        for o in output:
+                            loss += criterion(o, target_now)
+                        output = output[-1]
+                    else:  # single output
+                        pass
 
-            new_tsm_feature = new_tsm_feature.to(device)
-            # compute use TSM feature
-            for j in range(6):
-                input_now = input[:, j] # [B, 3, 256, 256]
-                input_depth_now = input_depth[:, j]
-                target_now = target[:, j]
-                output, _ = model(torch.cat((input_now, input_depth_now), 1), True, new_tsm_feature[:, j])
-
-                if type(output) == list:  # multiple output # beacuse of intermediate prediction
-                    for o in output:
-                        loss += criterion(o, target_now)
-                    output = output[-1]
-                else:  # single output
-                    pass
-
-                # print(output.shape)
-                # print(target_now.shape)
-                temp_iou = intersectionOverUnion(output.cpu(), target_now.cpu(), idx) # have not tested
-                iou_list.append(temp_iou)
-                score_map = output[-1].cpu() if type(output) == list else output.cpu()
+                    temp_iou = intersectionOverUnion(output.cpu(), target_now.cpu(), idx) # have not tested
+                    iou_list.append(temp_iou)
+                    score_map = output[-1].cpu() if type(output) == list else output.cpu()
             
+                # if RELABEL:
+                #     # save in same checkpoint
+                #     raw_mask_path = meta['mask_path_list'][j][0]
+                #     img_index = meta['image_index_list'][j][0]
+                #     temp_head = ('/').join(raw_mask_path.split('/')[:-8])
+                #     temp_tail = ('/').join(raw_mask_path.split('/')[-6:])
+                #     temp = os.path.join(temp_head, 'code/train_two_steps', checkpoint, 'pred_vis', temp_tail)
+                #     relabel_mask_dir, relabel_mask_name = os.path.split(temp)
+                #     relabel_mask_dir = os.path.dirname(relabel_mask_dir)
 
-                if RELABEL:
-                    # save in same checkpoint
-                    raw_mask_path = meta['mask_path_list'][j][0]
-                    img_index = meta['image_index_list'][j][0]
-                    temp_head = ('/').join(raw_mask_path.split('/')[:-8])
-                    temp_tail = ('/').join(raw_mask_path.split('/')[-6:])
-                    temp = os.path.join(temp_head, 'code/train_two_steps', checkpoint, 'pred_vis', temp_tail)
-                    relabel_mask_dir, relabel_mask_name = os.path.split(temp)
-                    relabel_mask_dir = os.path.dirname(relabel_mask_dir)
+                #     raw_mask_rgb_path = os.path.join(os.path.dirname(os.path.dirname(raw_mask_path)), 'first_mask_rgb', relabel_mask_name)
+                #     new_mask_rgb_path = os.path.join(relabel_mask_dir, 'gt_' + relabel_mask_name)
+                #     raw_rgb_frame_path = os.path.join(os.path.dirname(os.path.dirname(raw_mask_path)), 'raw_frames', \
+                #         relabel_mask_name[:-4] + '.png')
 
-                    raw_mask_rgb_path = os.path.join(os.path.dirname(os.path.dirname(raw_mask_path)), 'first_mask_rgb', relabel_mask_name)
-                    new_mask_rgb_path = os.path.join(relabel_mask_dir, 'gt_' + relabel_mask_name)
-                    raw_rgb_frame_path = os.path.join(os.path.dirname(os.path.dirname(raw_mask_path)), 'raw_frames', \
-                        relabel_mask_name[:-4] + '.png')
-
-                    # print(relabel_mask_dir)
-                    # print(relabel_mask_name)
-                    from PIL import Image
-                    import numpy as np
-                    if os.path.exists(raw_mask_rgb_path):
-                        gt_mask_rgb = np.array(Image.open(raw_mask_rgb_path))
-                    else :
-                        gt_mask_rgb = np.array(Image.open(raw_rgb_frame_path))
-                    # print(input_now.shape)
-                    # print(score_map.shape)
-                    pred_batch_img, pred_mask = relabel_heatmap(input_now, score_map, 'pred') # return an Image object
+                #     from PIL import Image
+                #     import numpy as np
+                #     if os.path.exists(raw_mask_rgb_path):
+                #         gt_mask_rgb = np.array(Image.open(raw_mask_rgb_path))
+                #     else :
+                #         gt_mask_rgb = np.array(Image.open(raw_rgb_frame_path))
+                #     # print(input_now.shape)
+                #     # print(score_map.shape)
+                #     pred_batch_img, pred_mask = relabel_heatmap(input_now, score_map, 'pred') # return an Image object
                     
-                    if not isdir(relabel_mask_dir):
-                        mkdir_p(relabel_mask_dir)
+                #     if not isdir(relabel_mask_dir):
+                #         mkdir_p(relabel_mask_dir)
 
-                    if not gt_win or not pred_win:
-                        ax1 = plt.subplot(121)
-                        ax1.title.set_text('MASK_RGB_GT')
-                        gt_win = plt.imshow(gt_mask_rgb)
-                        ax2 = plt.subplot(122)
-                        ax2.title.set_text('Mask_RGB_PRED')
-                        pred_win = plt.imshow(pred_batch_img)
-                    else:
-                        gt_win.set_data(gt_mask_rgb)
-                        pred_win.set_data(pred_batch_img)
-                    plt.plot()
-                    index_name = "%05d.jpg" % (img_index)
-                    plt.savefig(os.path.join(relabel_mask_dir, 'vis_' + index_name))
-                    pred_mask.save(os.path.join(relabel_mask_dir, index_name))
-                    print(relabel_mask_dir) 
-                    
+                #     if not gt_win or not pred_win:
+                #         ax1 = plt.subplot(121)
+                #         ax1.title.set_text('MASK_RGB_GT')
+                #         gt_win = plt.imshow(gt_mask_rgb)
+                #         ax2 = plt.subplot(122)
+                #         ax2.title.set_text('Mask_RGB_PRED')
+                #         pred_win = plt.imshow(pred_batch_img)
+                #     else:
+                #         gt_win.set_data(gt_mask_rgb)
+                #         pred_win.set_data(pred_batch_img)
+                #     plt.plot()
+                #     index_name = "%05d.jpg" % (img_index)
+                #     plt.savefig(os.path.join(relabel_mask_dir, 'vis_' + index_name))
+                #     pred_mask.save(os.path.join(relabel_mask_dir, index_name)) 
+
 
             # measure accuracy and record loss
             losses.update(loss.item(), input.size(0))
@@ -582,9 +515,217 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
         bar.finish()
     return losses.avg, ioues.avg, predictions
 
+def validate_v2(val_loader, model, criterion, num_classes, checkpoint, debug=False, flip=True):
+    batch_time = AverageMeter()
+    data_time = AverageMeter()
+    losses = AverageMeter()
+    ioues = AverageMeter()
+
+    # predictions
+    predictions = torch.Tensor(val_loader.dataset.__len__(), num_classes, 2)
+
+    # switch to evaluate mode
+    model.eval()
+
+    gt_win, pred_win = None, None
+    iou = None
+    end = time.time()
+    bar = Bar('Eval ', max=len(val_loader))
+    with torch.no_grad():
+        for i, (input, input_depth, target, meta, video_input_eval, _, video_target_eval, area_to_detect_list) in enumerate(val_loader):
+            # if i == 1 : break
+            
+            # if i != 5 : continue
+            # if i == 6 : break
+            # print()
+
+            # measure data loading time
+            data_time.update(time.time() - end)
+
+            input = input.to(device, non_blocking=True)
+            input_depth = input_depth.to(device, non_blocking=True)
+            target = target.to(device, non_blocking=True)
+            video_target_eval = video_target_eval.to(device, non_blocking=True)
+
+
+            
+            batch_size = input.shape[0]
+            loss = 0
+            iou_list = []
+
+
+            
+            for j in range(6):
+                # load whole image 
+                input_whole = video_input_eval[:, j]
+                target_whole = video_target_eval[:, j] #[1, 32, 32]
+                output_whole = torch.zeros((1, 32, 32))
+                # output_whole = output_whole.to(device, non_blocking=True)
+
+
+                for obj_i in range(3):
+                    if len(area_to_detect_list[j]) <= obj_i:
+                        continue
+
+                    input_now = input[:, j, obj_i] # [B, 3, 256, 256]
+                    input_depth_now = input_depth[:, j, obj_i]
+                    target_now = target[:, j, obj_i]
+                    output, _ = model(torch.cat((input_now, input_depth_now), 1))
+                    
+                    output = output[-1]
+                    score_map_part = output.cpu()
+                    score_map_gt = target_now.cpu()
+                    output = output[-1].cpu().numpy()
+                    
+                    # map back to area_detect
+                    _x_min = float(area_to_detect_list[j][obj_i][0].numpy())
+                    _y_min = float(area_to_detect_list[j][obj_i][1].numpy())
+                    _x_max = float(area_to_detect_list[j][obj_i][2].numpy())
+                    _y_max = float(area_to_detect_list[j][obj_i][3].numpy())
+                    OUT_RES = 32
+                    # order is reversed
+                    # print(_x_min, _y_min, _x_max, _y_max)
+                    x_min = round(_x_min / 640 * OUT_RES)
+                    y_min = round(_y_min / 480 * OUT_RES)
+                    x_max = min(round(_x_max / 640 * OUT_RES), 31)
+                    y_max = min(round(_y_max / 480 * OUT_RES), 31)
+                    x_len = x_max - x_min
+                    y_len = y_max - y_min
+                    # print(x_min, y_min, x_max, y_max)
+
+                    ## resize out now to fixed size
+                    if x_len > 0 and y_len > 0 :
+                        resized_out = faster_rcnn_crop(output, x_len, y_len)
+                        # print(resized_out.shape)
+                        # output_whole[0, y_min:y_max, x_min:x_max] = 1
+                        output_whole[0, y_min:y_max, x_min:x_max] = resized_out
+
+                        # resized_out = faster_rcnn_crop(output, y_len, x_len)
+                        # output_whole[0, x_min:x_max, y_min:y_max] = resized_out
+
+
+                        # # part image
+                        # if RELABEL:
+                        #     # save in same checkpoint
+                        #     raw_mask_path = meta['mask_path_list'][j][0]
+                        #     img_index = meta['image_index_list'][j][0]
+                        #     temp_head = ('/').join(raw_mask_path.split('/')[:-8])
+                        #     temp_tail = ('/').join(raw_mask_path.split('/')[-6:])
+                        #     temp = os.path.join(temp_head, 'code/train_two_steps', checkpoint, 'pred_vis', temp_tail)
+                        #     relabel_mask_dir, relabel_mask_name = os.path.split(temp)
+                        #     relabel_mask_dir = os.path.dirname(relabel_mask_dir)
+
+                        #     raw_mask_rgb_path = os.path.join(os.path.dirname(os.path.dirname(raw_mask_path)), 'first_mask_rgb', relabel_mask_name)
+                        #     new_mask_rgb_path = os.path.join(relabel_mask_dir, 'gt_' + relabel_mask_name)
+                        #     raw_rgb_frame_path = os.path.join(os.path.dirname(os.path.dirname(raw_mask_path)), 'raw_frames', \
+                        #         relabel_mask_name[:-4] + '.png')
+
+                        #     from PIL import Image
+                        #     import numpy as np
+                        #     # if os.path.exists(raw_mask_rgb_path):
+                        #     #     gt_mask_rgb = np.array(Image.open(raw_mask_rgb_path))
+                        #     # else :
+                        #     #     gt_mask_rgb = np.array(Image.open(raw_rgb_frame_path))
+
+                        #     gt_mask_rgb, _ = relabel_heatmap(input_now, score_map_gt, 'gt') # checked
+
+                        #     pred_batch_img, pred_mask = relabel_heatmap(input_now, score_map_part, 'pred') # return an Image object
+                            
+                        #     if not isdir(relabel_mask_dir):
+                        #         mkdir_p(relabel_mask_dir)
+
+                        #     if not gt_win or not pred_win:
+                        #         ax1 = plt.subplot(121)
+                        #         ax1.title.set_text('MASK_RGB_GT')
+                        #         gt_win = plt.imshow(gt_mask_rgb)
+                        #         ax2 = plt.subplot(122)
+                        #         ax2.title.set_text('Mask_RGB_PRED')
+                        #         pred_win = plt.imshow(pred_batch_img)
+                        #     else:
+                        #         gt_win.set_data(gt_mask_rgb)
+                        #         pred_win.set_data(pred_batch_img)
+                        #     plt.plot()
+
+                        #     plt.savefig(os.path.join(relabel_mask_dir, '%05d_part_%d.jpg' % (img_index, obj_i)))
+                        #     # pred_mask.save(os.path.join(relabel_mask_dir, index_name)) 
+               
+                output_whole = torch.unsqueeze(output_whole, 0)
+                target_whole = torch.unsqueeze(target_whole, 0)
+
+                score_map_whole = output_whole.cpu()
+
+                temp_iou = intersectionOverUnion(output_whole, target_whole.cpu(), idx) # have not tested
+                iou_list.append(temp_iou)
+
+                # whole image
+                if RELABEL:
+                    # save in same checkpoint
+                    raw_mask_path = meta['mask_path_list'][j][0]
+                    img_index = meta['image_index_list'][j][0]
+                    temp_head = ('/').join(raw_mask_path.split('/')[:-8])
+                    temp_tail = ('/').join(raw_mask_path.split('/')[-6:])
+                    temp = os.path.join(temp_head, 'code/train_two_steps', checkpoint, 'pred_vis', temp_tail)
+                    relabel_mask_dir, relabel_mask_name = os.path.split(temp)
+                    relabel_mask_dir = os.path.dirname(relabel_mask_dir)
+
+                    raw_mask_rgb_path = os.path.join(os.path.dirname(os.path.dirname(raw_mask_path)), 'first_mask_rgb', relabel_mask_name)
+                    new_mask_rgb_path = os.path.join(relabel_mask_dir, 'gt_' + relabel_mask_name)
+                    raw_rgb_frame_path = os.path.join(os.path.dirname(os.path.dirname(raw_mask_path)), 'raw_frames', \
+                        relabel_mask_name[:-4] + '.png')
+
+                    from PIL import Image
+                    import numpy as np
+                    if os.path.exists(raw_mask_rgb_path):
+                        gt_mask_rgb = np.array(Image.open(raw_mask_rgb_path))
+                    else :
+                        gt_mask_rgb = np.array(Image.open(raw_rgb_frame_path))
+                    # print(input_now.shape)
+                    # print(score_map.shape)
+                    pred_batch_img, pred_mask = relabel_heatmap(input_whole, score_map_whole, 'pred') # return an Image object
+                    
+                    if not isdir(relabel_mask_dir):
+                        mkdir_p(relabel_mask_dir)
+
+                    if not gt_win or not pred_win:
+                        ax1 = plt.subplot(121)
+                        ax1.title.set_text('MASK_RGB_GT')
+                        gt_win = plt.imshow(gt_mask_rgb)
+                        ax2 = plt.subplot(122)
+                        ax2.title.set_text('Mask_RGB_PRED')
+                        pred_win = plt.imshow(pred_batch_img)
+                    else:
+                        gt_win.set_data(gt_mask_rgb)
+                        pred_win.set_data(pred_batch_img)
+                    plt.plot()
+                    index_name = "%05d.jpg" % (img_index)
+                    plt.savefig(os.path.join(relabel_mask_dir, 'vis_' + index_name))
+                    pred_mask.save(os.path.join(relabel_mask_dir, index_name)) 
+                    # print(os.path.join(relabel_mask_dir, 'vis_' + index_name))
+
+            # acces.update(acc[0], input.size(0))
+            ioues.update(sum(iou_list) / len(iou_list), input.size(0))
+
+            # measure elapsed time
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            # plot progress
+            bar.suffix  = '({batch}/{size}) Data: {data:.6f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:}'.format(
+                        batch=i + 1,
+                        size=len(val_loader),
+                        data=data_time.val,
+                        bt=batch_time.avg,
+                        total=bar.elapsed_td,
+                        eta=bar.eta_td
+                        )
+            bar.next()
+        bar.finish()
+    return 0, ioues.avg, predictions
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-    parser.add_argument('--dataset', metavar='DATASET', default='sad_step_1',
+    parser.add_argument('--dataset', metavar='DATASET', default='sad_faster_rcnn_step_1',
                         choices=dataset_names,
                         help='Datasets: ' +
                             ' | '.join(dataset_names) +
@@ -597,14 +738,14 @@ if __name__ == '__main__':
                         help='year of coco dataset: 2014 (default) | 2017)')
 
 
-    parser.add_argument('--inp-res', default=256, type=int,
-                        help='input resolution (default: 256)')
-    parser.add_argument('--out-res', default=64, type=int,
-                    help='output resolution (default: 64, to gen GT)')
-    # parser.add_argument('--inp-res', default=128, type=int,
+    # parser.add_argument('--inp-res', default=256, type=int,
     #                     help='input resolution (default: 256)')
-    # parser.add_argument('--out-res', default=32, type=int,
+    # parser.add_argument('--out-res', default=64, type=int,
     #                 help='output resolution (default: 64, to gen GT)')
+    parser.add_argument('--inp-res', default=128, type=int,
+                        help='input resolution (default: 256)')
+    parser.add_argument('--out-res', default=32, type=int,
+                    help='output resolution (default: 64, to gen GT)')
 
                         
     parser.add_argument('--dataset-list-dir-path', default='/home/s5078345/Affordance-Detection-on-Video/dataset_two_steps/data_list', type=str,
@@ -616,7 +757,7 @@ if __name__ == '__main__':
                         help='model architecture: ' +
                             ' | '.join(model_names) +
                             ' (default: hg)')
-    parser.add_argument('-s', '--stacks', default=4, type=int, metavar='N',
+    parser.add_argument('-s', '--stacks', default=2, type=int, metavar='N',
                         help='Number of hourglasses to stack')
     parser.add_argument('--features', default=256, type=int, metavar='N',
                         help='Number of features in the hourglass')
@@ -637,9 +778,9 @@ if __name__ == '__main__':
                         help='manual epoch number (useful on restarts)')
 
     # 2 GPU setting
-    parser.add_argument('--train-batch', default=8, type=int, metavar='N',
+    parser.add_argument('--train-batch', default=12, type=int, metavar='N',
                         help='train batchsize')
-    parser.add_argument('--test-batch', default=8, type=int, metavar='N',
+    parser.add_argument('--test-batch', default=12, type=int, metavar='N',
                         help='train batchsize')
 
     # 1 GPU setting

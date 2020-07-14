@@ -1,5 +1,7 @@
 '''
 python output_curve.py --resume ./checkpoint/checkpoint_0604_coco_step_1.pth.tar -w
+
+python output_curve.py --resume ./checkpoint/checkpoint_0604_coco_step_1.pth.tar -w
 '''
 
 from __future__ import print_function, absolute_import

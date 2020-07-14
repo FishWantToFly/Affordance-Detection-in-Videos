@@ -1,25 +1,11 @@
 '''
-Step 2 in two_steps (segmentation + binary classification)
+2020.7.3
+use faster rcnn bbox to clip pred and gt bbox
 
-# Use pred mask from checkpoint_0428/pred_vis as input
+python main_eval_0703_faster_rcnn.py --mask ./checkpoint_0428/pred_vis --resume ./checkpoint_0523_input_pred_mask/checkpoint_best_iou.pth.tar -e
 
-# training 
-python main_0522_step_2.py --mask ./checkpoint_0428/pred_vis
 
-python main_0522_step_2.py --mask ./checkpoint_0613_coco_sad_train/pred_vis
 
-# resume training from checkpoint
-python main.py --resume ./checkpoint/checkpoint_20.pth.tar
-# draw line chart (loss and IoU curve)
-python main.py --resume ./checkpoint/checkpoint_20.pth.tar -w
-# visualization of pred / gt image (random)
-python main.py --resume ./checkpoint/checkpoint_20.pth.tar -e -d 
-
-# relabel train/test (visualize in same architecture)
-python main.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
-
-# temp
-python main_0522_step_2.py --mask ./checkpoint_0428/pred_vis --resume ./checkpoint_0523_input_pred_mask/checkpoint_best_iou.pth.tar -e
 '''
 from __future__ import print_function, absolute_import
 
@@ -27,9 +13,9 @@ import os
 import argparse
 import time
 import matplotlib.pyplot as plt
-import random
+import random, math
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 
 import torch
 import torch.nn.parallel
@@ -44,12 +30,16 @@ from affordance.utils.logger import Logger, savefig
 from affordance.utils.evaluation import accuracy, AverageMeter, final_preds, intersectionOverUnion
 from affordance.utils.misc import save_checkpoint, save_pred, adjust_learning_rate
 from affordance.utils.osutils import mkdir_p, isfile, isdir, join
-from affordance.utils.imutils import batch_with_heatmap, sample_test, relabel_heatmap
+from affordance.utils.imutils import batch_with_heatmap, sample_test, relabel_heatmap, eval_heatmap
 from affordance.utils.transforms import fliplr, flip_back
 import affordance.models as models
 import affordance.datasets as datasets
 import affordance.losses as losses
 from sklearn.metrics import accuracy_score
+
+
+
+
 
 # get model names and dataset names
 model_names = sorted(name for name in models.__dict__
@@ -68,13 +58,6 @@ output_res = None
 idx = []
 
 RELABEL = False
-
-# 2020.6.19
-# LSTM_STATE = 'stateless'
-LSTM_STATE = 'stateful'
-
-print("LSTM STATE NOW : %s" % (LSTM_STATE))
-
 
 # select proper device to run
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -130,12 +113,11 @@ def main(args):
     if args.relabel == True:
         args.test_batch = 1
     elif args.test == True:
-        args.train_batch = 1
+        args.train_batch = 2
+        args.test_batch = 2
+        args.epochs = 10
+    elif args.evaluate == True:
         args.test_batch = 1
-        args.epochs = 20
-        # args.train_batch = 2
-        # args.test_batch = 2
-        # args.epochs = 10
 
     # write line-chart and stop program
     if args.write: 
@@ -147,7 +129,8 @@ def main(args):
         idx = [1,2,3,4,5,6,11,12,15,16]
     elif args.dataset == 'coco':
         idx = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]
-    elif args.dataset == 'sad' or args.dataset == 'sad_step_2' or args.dataset == 'sad_step_2_eval' :
+    elif args.dataset == 'sad' or args.dataset == 'sad_step_2' or args.dataset == 'sad_step_2_eval' \
+        or  args.dataset == 'sad_eval':
         idx = [1] # support affordance
     else:
         print("Unknown dataset: {}".format(args.dataset))
@@ -215,21 +198,19 @@ def main(args):
         num_workers=args.workers, pin_memory=True
     )
 
-    
-    # for i, (input, input_depth, input_mask, target, meta) in enumerate(train_loader):
-    #     print(len(input))
-    #     print(input[0].shape)
-    #     print(input_mask[0].shape)
-    #     print(target[0].shape)
-    #     return
-    
-
     val_dataset = datasets.__dict__[args.dataset](is_train=False, **vars(args))
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=args.test_batch, shuffle=False,
         num_workers=args.workers, pin_memory=True
     )
+
+    # for i, (input, input_depth, input_mask, target, meta, gt_mask) in enumerate(val_loader):
+    #     if i == 10 : break
+    #     print(gt_mask.shape)
+    
+    # return 
+
 
     
     # redraw training / test label :
@@ -238,9 +219,9 @@ def main(args):
         RELABEL = True
         if args.evaluate:
             print('\nRelabel val label')
-            loss, acc = validate(val_loader, model, criterion, njoints,
+            loss, acc, final_acc  = validate(val_loader, model, criterion, njoints,
                                     args.checkpoint, args.debug, args.flip)
-            print("Val acc: %.3f" % (acc))
+            print("Final acc: %.3f" % (final_acc))
             return 
 
     # evaluation only
@@ -249,136 +230,33 @@ def main(args):
     if args.evaluate:
         print('\nEvaluation only')
         JUST_EVALUATE = True
-        loss, acc = validate(val_loader, model, criterion, njoints,
+        loss, acc, final_acc = validate(val_loader, model, criterion, njoints,
                                            args.checkpoint, args.debug, args.flip)
-        print("Val acc: %.3f" % (acc))
+        # print("(Step 2) Val acc: %.3f" % (acc))
+        print("Final acc: %.3f" % (final_acc))
         return
     
 
-    ## backup when training starts
-    code_backup_dir = 'code_backup'
-    mkdir_p(os.path.join(args.checkpoint, code_backup_dir))
-    os.system('cp ../affordance/models/affordance_classification.py %s/%s/affordance_classification.py' % (args.checkpoint, code_backup_dir))
-    os.system('cp ../affordance/models/convlstm.py %s/%s/convlstm.py' % (args.checkpoint, code_backup_dir))
-    os.system('cp ../affordance/datasets/sad_step_2_eval.py %s/%s/sad_step_2_eval.py' % (args.checkpoint, code_backup_dir))
-    this_file_name = os.path.split(os.path.abspath(__file__))[1]
-    os.system('cp ./%s %s' % (this_file_name, os.path.join(args.checkpoint, code_backup_dir, this_file_name)))
-
-    # train and eval
-    lr = args.lr
-    for epoch in range(args.start_epoch, args.epochs):
-        lr = adjust_learning_rate(optimizer, epoch, lr, args.schedule, args.gamma)
-        print('\nEpoch: %d | LR: %.8f' % (epoch + 1, lr))
-
-        # decay sigma
-        if args.sigma_decay > 0:
-            train_loader.dataset.sigma *=  args.sigma_decay
-            val_loader.dataset.sigma *=  args.sigma_decay
-
-        # train for one epoch
-        train_loss = train(train_loader, model, criterion, optimizer,
-                                      args.debug, args.flip)
-        
-        # evaluate on validation set
-        valid_loss, valid_acc = validate(val_loader, model, criterion,
-                                                  njoints, args.checkpoint, args.debug, args.flip)
-        print("Val acc: %.3f" % (valid_acc))
-
-        # append logger file
-        logger.append([epoch + 1, lr, train_loss, valid_loss, valid_acc])
-
-        # remember best acc and save checkpoint
-        is_best_iou = valid_acc > best_iou
-        best_iou = max(valid_acc, best_iou)
-        save_checkpoint({
-            'epoch': epoch + 1,
-            'arch': args.arch,
-            'state_dict': model.state_dict(),
-            'best_iou': best_iou,
-            'optimizer' : optimizer.state_dict(),
-        }, is_best_iou, checkpoint=args.checkpoint, snapshot=args.snapshot)
-        
-
-    logger.close()
-
-    print("Best acc = %.3f" % (best_iou))
-    # draw_line_chart(args, os.path.join(args.checkpoint, 'log.txt'))
-
-def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
-    batch_time = AverageMeter()
-    data_time = AverageMeter()
-    losses = AverageMeter()
-
-    # switch to train mode
-    model.train()
-
-    end = time.time()
-
-    gt_win, pred_win = None, None
-    bar = Bar('Train', max=len(train_loader))
-    for i, (input, input_depth, input_mask, target, meta) in enumerate(train_loader):
-
-        # measure data loading time
-        data_time.update(time.time() - end)
-
-        input, input_mask, target = input.to(device), input_mask.to(device), target.to(device, non_blocking=True)
-        input_depth = input_depth.to(device)
-        # target_weight = meta['target_weight'].to(device, non_blocking=True)
-
-        batch_size = input.shape[0]
-        loss = 0
-        last_state = None 
-
-        for j in range(6):
-            input_now = input[:, j] # [B, 3, 256, 256]
-            input_depth_now = input_depth[:, j]
-            input_mask_now = input_mask[:, j]
-            target_now = target[:, j]
-            if j == 0:
-                output, output_state = model(torch.cat((input_now, input_depth_now, input_mask_now), 1))
-            else : 
-                if LSTM_STATE == 'stateness' :
-                    output, output_state = model(torch.cat((input_now, input_depth_now, input_mask_now), 1))
-                elif LSTM_STATE == 'stateful' :
-                    output, output_state = model(torch.cat((input_now, input_depth_now, input_mask_now), 1), input_state = last_state)
-                
-            last_state = output_state
-            
-            loss += criterion(output, target_now)
-            # print(loss.item())
-
-        # # measure accuracy and record loss
-        losses.update(loss.item(), input.size(0))
-
-        # compute gradient and do SGD step
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-        end = time.time()
-
-        # plot progress
-        bar.suffix  = '({batch}/{size}) Data: {data:.6f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f}'.format(
-                    batch=i + 1,
-                    size=len(train_loader),
-                    data=data_time.val,
-                    bt=batch_time.val,
-                    total=bar.elapsed_td,
-                    eta=bar.eta_td,
-                    loss=losses.avg,
-                    )
-        bar.next()
-    bar.finish()
-    return losses.avg
-
-
 def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False, flip=True):
+    import numpy as np
+
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
     acces = AverageMeter()
+    ioues = AverageMeter()
+
+    # for statistic
+    gt_trues = AverageMeter()
+    gt_falses = AverageMeter()
+    pred_trues = AverageMeter() # true == true and iou > 50%
+    pred_falses = AverageMeter()
+    
+    pred_trues_first = AverageMeter() # true == true
+
+    # iou > 50% and step 2 labels are both right -> correcct
+    # if label is false (and pred is false too) -> correct
+    final_acces = AverageMeter() 
 
     # switch to evaluate mode
     model.eval()
@@ -388,8 +266,9 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
     end = time.time()
     bar = Bar('Eval ', max=len(val_loader))
     with torch.no_grad():
-        for i, (input, input_depth, input_mask, target, meta) in enumerate(val_loader):
-            # if RELABEL and i == 2 : break
+        for i, (input, input_depth, input_mask, target, meta, gt_mask) in enumerate(val_loader):
+            
+            # if i == 10 : break
 
             # measure data loading time
             data_time.update(time.time() - end)
@@ -401,60 +280,172 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
             loss = 0
             last_state = None 
             acc_list = []
+            iou_list = []
+            final_acc_list = []
 
-            # compute use TSM feature
+            # for statistic
+            gt_true_list = []
+            gt_false_list = []
+            pred_true_list = []
+            pred_false_list = []
+            pred_true_first_list = []
+
             for j in range(6):
                 input_now = input[:, j] # [B, 3, 256, 256]
                 input_depth_now = input_depth[:, j]
                 input_mask_now = input_mask[:, j]
+                gt_mask_now = gt_mask[:, j]
                 target_now = target[:, j]
+
                 if j == 0:
                     output, output_state = model(torch.cat((input_now, input_depth_now, input_mask_now), 1))
                 else : 
-                    if LSTM_STATE == 'stateness' :
-                        output, output_state = model(torch.cat((input_now, input_depth_now, input_mask_now), 1))
-                    elif LSTM_STATE == 'stateful' :
-                        output, output_state = model(torch.cat((input_now, input_depth_now, input_mask_now), 1), input_state = last_state)
-                last_state = output_state
-                
+                    output, output_state = model(torch.cat((input_now, input_depth_now, input_mask_now), 1), input_state = last_state)
                     # print(output.shape)
 
+                last_state = output_state
+
+
+                #############################
+                '''
+                testing now
+                '''
+                input_mask_now = input_mask_now.cpu()
+                gt_mask_now = gt_mask_now.cpu()
+
+                raw_mask_path = meta['mask_path_list'][j][0]
+                img_index = meta['image_index_list'][j][0]
+                temp_head = ('/').join(raw_mask_path.split('/')[:-8])
+                temp_tail = ('/').join(raw_mask_path.split('/')[-6:])
+                temp = os.path.join(temp_head, 'code/train_two_steps', checkpoint, 'pred_vis', temp_tail)
+                relabel_mask_dir, relabel_mask_name = os.path.split(temp)
+                relabel_mask_dir = os.path.dirname(relabel_mask_dir)
+                area_head = '/home/s5078345/Affordance-Detection-on-Video/faster-rcnn.pytorch/data_affordance_bbox'
+                area_tail = ('/').join(raw_mask_path.split('/')[3:-1])
+
+                # print(raw_mask_path)
+                # print(area_tail)
+
+                area_to_detect_data_path = os.path.join(area_head, area_tail, relabel_mask_name[:-4] + '.txt')
+                area_to_detect_list = []
+                with open(area_to_detect_data_path) as f:
+                    for line in f:
+                        inner_list = [int(elt.strip()) for elt in line.split(' ')]
+                        # in alternative, if you need to use the file content as numbers
+                        # inner_list = [int(elt.strip()) for elt in line.split(',')]
+                        area_to_detect_list.append(inner_list)
+                if len(area_to_detect_list) == 0:
+                    area_to_detect_list = None
+                
+                area_to_detect = area_to_detect_list
+                if area_to_detect is not None :
+                    out_resized_area = torch.zeros((1, 1, 64, 64))
+                    gt_resized_area = torch.zeros((1, 1, 64, 64))
+                    for _i in range(len(area_to_detect)):
+                        x_min, y_min, x_max, y_max = area_to_detect[_i]
+
+                        x_min = math.floor(x_min / 640 * 64)
+                        y_min = math.floor(y_min / 480 * 64)
+                        x_max = math.ceil(x_max / 640 * 64)
+                        y_max = math.ceil(y_max / 480 * 64)
+                        
+                        # clip pred
+                        out_resized_area[0, 0, y_min:y_max, x_min:x_max] = input_mask_now[0, 0, y_min:y_max, x_min:x_max]
+
+                        # clip GT
+                        gt_resized_area[0, 0, y_min:y_max, x_min:x_max] = gt_mask_now[0, 0, y_min:y_max, x_min:x_max]
+                    
+                    input_mask_now = out_resized_area
+                    gt_mask_now = gt_resized_area
+
+                ####################################################
+
+
+
+
+
+                # compute loss
                 round_output = torch.round(output).float()
                 loss += criterion(output, target_now)
 
                 temp_acc = float((round_output == target_now).sum()) / batch_size
+
+                temp_1 = (round_output == 1) & (target_now == 1)
+                temp_acc_1 = temp_1.cpu().numpy()
+                temp_2 = (round_output == 0) & (target_now == 0)
+                temp_acc_2 = temp_2.cpu().numpy()
+                
+                temp_iou = intersectionOverUnion(gt_mask_now, input_mask_now.cpu(), idx, return_list = True)
+                
+                final_pred_1 = np.logical_and(temp_acc_1, temp_iou > 0.5)
+                final_pred_2 = temp_acc_2
+                final_pred = np.logical_or(final_pred_1, final_pred_2)
+
                 acc_list.append(temp_acc)
-
+                final_acc_list.append(np.sum(final_pred) / batch_size)
                 round_output = round_output.cpu()
-                # print(round_output)
 
+                # for statistic
+                temp_1 = (target_now == 1).cpu().numpy()
+                temp_2 = (target_now == 0).cpu().numpy()
+                gt_true_list.append(np.sum(temp_1) / batch_size)
+                gt_false_list.append(np.sum(temp_2) / batch_size)
+
+                pred_true_list.append(np.sum(final_pred_1) / batch_size)
+                pred_false_list.append(np.sum(final_pred_2) / batch_size)
+                pred_true_first_list.append(np.sum(temp_acc_1) / batch_size)
+
+                
                 if RELABEL:
-                    # save in same checkpoint
-                    raw_mask_path = meta['mask_path_list'][j][0]
-                    img_index = meta['image_index_list'][j][0]
-                    temp_head = ('/').join(raw_mask_path.split('/')[:-8])
-                    temp_tail = ('/').join(raw_mask_path.split('/')[-5:])
-                    temp = os.path.join(temp_head, 'code/train_two_steps', checkpoint, 'pred_vis', temp_tail)
-                    relabel_mask_dir, relabel_mask_name = os.path.split(temp)
-                    relabel_mask_dir = os.path.dirname(relabel_mask_dir)
-
-                    raw_mask_rgb_path = os.path.join(os.path.dirname(os.path.dirname(raw_mask_path)), 'first_mask_rgb', relabel_mask_name)
-                    new_mask_rgb_path = os.path.join(relabel_mask_dir, 'gt_' + relabel_mask_name)
-                    raw_rgb_frame_path = os.path.join(os.path.dirname(os.path.dirname(raw_mask_path)), 'raw_frames', \
-                        relabel_mask_name[:-4] + '.png')
-
+                    '''
+                    left image : GT
+                        image : gt_mask_rgb
+                        label : target_now
+                    right image : predict result
+                        image : raw_frames (pred false) or ./checkpoint_0428/pred_vis (pred true)
+                        label : round_output
+                    '''
                     from PIL import Image
                     import numpy as np
-                    if os.path.exists(raw_mask_rgb_path):
-                        gt_mask_rgb = np.array(Image.open(raw_mask_rgb_path))
+                    import copy
+
+                    # save in same checkpoint
+                    img_index = meta['image_index_list'][j][0]
+
+                    raw_mask_path = meta['mask_path_list'][j][0]
+                    gt_mask_path = meta['gt_mask_path_list'][j][0]
+
+                    temp_head = ('/').join(gt_mask_path.split('/')[:-8])
+                    temp_tail = ('/').join(gt_mask_path.split('/')[-5:])
+                    temp = os.path.join(temp_head, 'code/train_two_steps/eval_bbox_clip', 'pred_vis', temp_tail)
+                    relabel_mask_dir, relabel_mask_name = os.path.split(temp)
+                    relabel_mask_dir = os.path.dirname(relabel_mask_dir) # new dir name for pred_vis
+
+                    # raw frame
+                    raw_rgb_frame_path = os.path.join(os.path.dirname(os.path.dirname(gt_mask_path)), 'raw_frames', gt_mask_path.split('/')[-1][:-4] + '.png')
+                    raw_frame = np.array(Image.open(raw_rgb_frame_path))
+
+                    # gt_mask_rgb
+                    gt_mask_rgb_path = os.path.join(os.path.dirname(os.path.dirname(gt_mask_path)), 'mask_rgb', gt_mask_path.split('/')[-1])
+                    if os.path.exists(gt_mask_rgb_path):
+                        gt_mask_rgb = np.array(Image.open(gt_mask_rgb_path))
                     else :
-                        gt_mask_rgb = np.array(Image.open(raw_rgb_frame_path))
+                        gt_mask_rgb = copy.deepcopy(raw_frame)
+
+                    # pred mask
+                    pred_mask_path = os.path.join(os.path.dirname(raw_mask_path), relabel_mask_name)
+                    pred_mask = np.array(Image.open(pred_mask_path))
+
+                    pred_mask_rgb = eval_heatmap(raw_frame, pred_mask) # generate rgb 
+
 
                     if not isdir(relabel_mask_dir):
                         mkdir_p(relabel_mask_dir)
 
                     gt_label_str = None 
                     pred_label_str = None
+                    gt_output = gt_mask_rgb
+                    pred_output = None
 
                     if target_now[0][0] == 0:
                         gt_label_str = "GT : False"
@@ -463,29 +454,51 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
 
                     if round_output[0][0] == 0:
                         pred_label_str = "Pred : False"
+                        pred_output = raw_frame
                     elif round_output[0][0] == 1:
-                        pred_label_str = "Pred : True"
-                    output_str = gt_label_str + '. ' + pred_label_str
+                        pred_output = pred_mask_rgb
+                        if target_now[0][0] == 0 : 
+                            pred_label_str = "Pred : True"
+                        elif target_now[0][0] == 1 and temp_iou > 0.5 : 
+                            pred_label_str = "Pred : True (IoU : O)"
+                        elif target_now[0][0] == 1 and temp_iou <= 0.5 :
+                            pred_label_str = "Pred : True (IoU : X)"
+                        
+                    # output_str = gt_label_str + '. ' + pred_label_str
 
-                    # if target_now[0][0] != round_output[0][0] : 
-                    #     print(raw_rgb_frame_path)
+                    if not gt_win or not pred_win:
+                        ax1 = plt.subplot(121)
+                        ax1.title.set_text(gt_label_str)
+                        gt_win = plt.imshow(gt_output)
+                        ax2 = plt.subplot(122)
+                        ax2.title.set_text(pred_label_str)
+                        pred_win = plt.imshow(pred_output)
 
-                    if not gt_win:
-                        plt.plot()
-                        plt.title(output_str)
-                        gt_win = plt.imshow(gt_mask_rgb)
                     else:
-                        plt.title(output_str)
-                        gt_win.set_data(gt_mask_rgb)
+                        gt_win.set_data(gt_output)
+                        pred_win.set_data(pred_output)
+
+                        ax1.title.set_text(gt_label_str)
+                        ax2.title.set_text(pred_label_str)
 
                     plt.plot()
                     index_name = "%05d.jpg" % (img_index)
                     plt.savefig(os.path.join(relabel_mask_dir, 'vis_' + index_name))
+                    
                 
 
             # measure accuracy and record loss
             losses.update(loss.item(), input.size(0))
             acces.update(sum(acc_list) / len(acc_list), input.size(0))
+            final_acces.update(sum(final_acc_list) / len(final_acc_list), input.size(0))
+
+            # for statistic
+            gt_trues.update(sum(gt_true_list) / len(gt_true_list), input.size(0))
+            gt_falses.update(sum(gt_false_list) / len(gt_false_list), input.size(0))
+            pred_trues.update(sum(pred_true_list) / len(pred_true_list), input.size(0))
+            pred_falses.update(sum(pred_false_list) / len(pred_false_list), input.size(0))
+            pred_trues_first.update(sum(pred_true_first_list) / len(pred_true_first_list), input.size(0))
+
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -503,11 +516,24 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                         )
             bar.next()
         bar.finish()
-    return losses.avg, acces.avg
+    
+    # for statistic
+    print("GT true : %.3f" % (gt_trues.avg))
+    print("GT false : %.3f" % (gt_falses.avg))
+    print("Pred true : %.3f" % (pred_trues.avg))
+    print("Pred false : %.3f" % (pred_falses.avg))
+    print("====")
+    print("Pred true (no considering IoU) : %.3f" % (pred_trues_first.avg))
+    print("IoU > 50 percent accuracy : %.3f" % (pred_trues.avg / pred_trues_first.avg))
+    print("===")
+    print("True part : %.3f acc, False part : %.3f acc" % (pred_trues.avg / gt_trues.avg, pred_falses.avg / gt_falses.avg))
+    print("Predict true label correct : %.3f" % (pred_trues_first.avg / gt_trues.avg))
+
+    return losses.avg, acces.avg, final_acces.avg
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-    parser.add_argument('--dataset', metavar='DATASET', default='sad_step_2_eval',
+    parser.add_argument('--dataset', metavar='DATASET', default='sad_eval', ## different from sad_step_2
                         choices=dataset_names,
                         help='Datasets: ' +
                             ' | '.join(dataset_names) +
@@ -524,11 +550,6 @@ if __name__ == '__main__':
                         help='input resolution (default: 256)')
     parser.add_argument('--out-res', default=64, type=int,
                     help='output resolution (default: 64, to gen GT)')
-    # parser.add_argument('--inp-res', default=128, type=int,
-    #                     help='input resolution (default: 256)')
-    # parser.add_argument('--out-res', default=32, type=int,
-    #                 help='output resolution (default: 64, to gen GT)')
-
                         
     parser.add_argument('--dataset-list-dir-path', default='/home/s5078345/Affordance-Detection-on-Video/dataset_two_steps/data_list', type=str,
                     help='dir of train/test data list')
@@ -560,18 +581,12 @@ if __name__ == '__main__':
                         help='manual epoch number (useful on restarts)')
 
     # 2 GPU setting
-    # parser.add_argument('--train-batch', default=20, type=int, metavar='N',
-    #                     help='train batchsize')
-    # parser.add_argument('--test-batch', default=20, type=int, metavar='N',
-    #                     help='train batchsize')
-
-    # 1 GPU setting
-    parser.add_argument('--train-batch', default=14, type=int, metavar='N',
+    parser.add_argument('--train-batch', default=20, type=int, metavar='N',
                         help='train batchsize')
-    parser.add_argument('--test-batch', default=14, type=int, metavar='N',
+    parser.add_argument('--test-batch', default=20, type=int, metavar='N',
                         help='train batchsize')
 
-    parser.add_argument('--lr', '--learning-rate', default=3e-5, type=float,
+    parser.add_argument('--lr', '--learning-rate', default=5e-5, type=float,
                         metavar='LR', help='initial learning rate')
     parser.add_argument('--momentum', default=0, type=float, metavar='M',
                         help='momentum')
@@ -615,5 +630,6 @@ if __name__ == '__main__':
     # 2020.5.20
     parser.add_argument('-m', '--mask',type=str, metavar='PATH',
                     help='input mask path')
+
 
     main(parser.parse_args())

@@ -4,7 +4,12 @@ Step 1 output is pre-generated (from args.mask)
 
 python main_eval.py --mask ./checkpoint_0428/pred_vis --resume ./checkpoint_0523_input_pred_mask/checkpoint_best_iou.pth.tar -e
 
+# different step training dataset
 python main_eval.py --mask ./checkpoint_0613_coco_sad_train/pred_vis --resume ./checkpoint_0616_stateless/checkpoint_best_iou.pth.tar -e
+
+# stateful convLSTM
+python main_eval.py --mask ./checkpoint_0428/pred_vis --resume ./checkpoint_0620_2.1.1/checkpoint_best_iou.pth.tar -e
+
 '''
 from __future__ import print_function, absolute_import
 
@@ -14,7 +19,7 @@ import time
 import matplotlib.pyplot as plt
 import random
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 
 import torch
 import torch.nn.parallel
@@ -250,7 +255,6 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
     gt_falses = AverageMeter()
     pred_trues = AverageMeter() # true == true and iou > 50%
     pred_falses = AverageMeter()
-    
     pred_trues_first = AverageMeter() # true == true
 
     # iou > 50% and step 2 labels are both right -> correcct
@@ -295,12 +299,16 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                 input_mask_now = input_mask[:, j]
                 gt_mask_now = gt_mask[:, j]
                 target_now = target[:, j]
+
                 if j == 0:
-                    output, last_state = model(torch.cat((input_now, input_depth_now, input_mask_now), 1))
+                    output, output_state = model(torch.cat((input_now, input_depth_now, input_mask_now), 1))
                 else : 
-                    output, _ = model(torch.cat((input_now, input_depth_now, input_mask_now), 1), input_last_state = last_state)
+                    output, output_state = model(torch.cat((input_now, input_depth_now, input_mask_now), 1), input_state = last_state)
                     # print(output.shape)
 
+                last_state = output_state
+
+                # compute loss
                 round_output = torch.round(output).float()
                 loss += criterion(output, target_now)
 
@@ -459,9 +467,11 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
     print("Pred true : %.3f" % (pred_trues.avg))
     print("Pred false : %.3f" % (pred_falses.avg))
     print("====")
-    print("Pred true (no considering Iou) : %.3f" % (pred_trues_first.avg))
+    print("Pred true (no considering IoU) : %.3f" % (pred_trues_first.avg))
     print("IoU > 50 percent accuracy : %.3f" % (pred_trues.avg / pred_trues_first.avg))
-    print()
+    print("===")
+    print("True part : %.3f acc, False part : %.3f acc" % (pred_trues.avg / gt_trues.avg, pred_falses.avg / gt_falses.avg))
+    print("Predict true label correct : %.3f" % (pred_trues_first.avg / gt_trues.avg))
 
     return losses.avg, acces.avg, final_acces.avg
 

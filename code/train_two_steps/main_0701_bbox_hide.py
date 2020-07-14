@@ -1,33 +1,16 @@
 '''
+Copy from main_0428.py
+
 Train step 1 on sad dataset.
 
-# training 
-python main_0428.py
-# training using only 10 actions (for test)
-python main.py -t 
-
-# resume training from checkpoint
-python main_0428.py --resume ./checkpoint_0605_coco_all_step_1/checkpoint_best_iou.pth.tar
-# resume pre-training from checkpoint
-python main_0428.py --resume ./checkpoint_0605_coco_all_step_1/checkpoint_best_iou.pth.tar -p
-
-python main_0428.py --resume ./checkpoint_0612_8000_to_200/checkpoint_best_iou.pth.tar -p
+just use detecion result to clip mask (prevent error prediction)
 
 
-
-
-
-
-# draw line chart (loss and IoU curve)
-python main.py --resume ./checkpoint/checkpoint_20.pth.tar -w
 
 # relabel train/test (visualize in same architecture)
-python main_0428.py --resume ./checkpoint_0428/checkpoint_best_iou.pth.tar -e -r
+python main_0701_bbox_hide.py --resume ./checkpoint_0428/checkpoint_best_iou.pth.tar -e -r
 
-python main_0428.py --resume ./checkpoint_0606_coco_fine_tune_step_1/checkpoint_best_iou.pth.tar -e -r
 
-# temp
-python main_0428.py --resume ./checkpoint_0606_coco_fine_tune_step_1/checkpoint_best_iou.pth.tar -e
 '''
 from __future__ import print_function, absolute_import
 
@@ -35,7 +18,7 @@ import os
 import argparse
 import time
 import matplotlib.pyplot as plt
-import random
+import random, math
 
 os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 
@@ -131,6 +114,7 @@ def main(args):
 
     if args.resume != '' and args.pre_train == False:
         args.checkpoint = ('/').join(args.resume.split('/')[:2])
+
     if args.relabel == True:
         args.test_batch = 1
     if args.test == True:
@@ -139,7 +123,7 @@ def main(args):
         args.epochs = 20
 
     if args.evaluate and args.relabel == False:
-        args.test_batch = 10
+        args.test_batch = 1
 
     # write line-chart and stop program
     if args.write: 
@@ -277,8 +261,10 @@ def main(args):
         RELABEL = True
         if args.evaluate:
             print('\nRelabel val label')
+            new_checkpoint = 'checkpoint_0701_bbox_hide'
+            mkdir_p(new_checkpoint)
             loss, iou, predictions = validate(val_loader, model, criterion, njoints,
-                                    args.checkpoint, args.debug, args.flip)
+                                    new_checkpoint, args.debug, args.flip)
             # Because test and val are all considered -> iou is uesless
             # print("Val IoU: %.3f" % (iou))
             return 
@@ -291,8 +277,10 @@ def main(args):
         if args.debug :
             print('Draw pred /gt heatmap')
         JUST_EVALUATE = True
+        new_checkpoint = 'checkpoint_0701_bbox_hide'
+        mkdir_p(new_checkpoint)
         loss, iou, predictions = validate(val_loader, model, criterion, njoints,
-                                           args.checkpoint, args.debug, args.flip)
+                                           new_checkpoint, args.debug, args.flip)
         print("Val IoU: %.3f" % (iou))
         return
 
@@ -318,10 +306,12 @@ def main(args):
         # train for one epoch
         train_loss = train(train_loader, model, criterion, optimizer,
                                       args.debug, args.flip)
+        
+
 
         # evaluate on validation set
         valid_loss, valid_iou, predictions = validate(val_loader, model, criterion,
-                                                  njoints, args.checkpoint, args.debug, args.flip)
+                                                  njoints, arg.checkpoint, args.debug, args.flip)
         print("Val IoU: %.3f" % (valid_iou))
 
         # append logger file
@@ -505,13 +495,62 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                 else:  # single output
                     pass
 
-                # print(output.shape)
-                # print(target_now.shape)
+                '''
+                testing now
+                '''
+                output = output.cpu()
+                target_now = target_now.cpu()
+
+                raw_mask_path = meta['mask_path_list'][j][0]
+                img_index = meta['image_index_list'][j][0]
+                temp_head = ('/').join(raw_mask_path.split('/')[:-8])
+                temp_tail = ('/').join(raw_mask_path.split('/')[-6:])
+                temp = os.path.join(temp_head, 'code/train_two_steps', checkpoint, 'pred_vis', temp_tail)
+                relabel_mask_dir, relabel_mask_name = os.path.split(temp)
+                relabel_mask_dir = os.path.dirname(relabel_mask_dir)
+                area_head = '/home/s5078345/Affordance-Detection-on-Video/faster-rcnn.pytorch/data_affordance_bbox'
+                area_tail = ('/').join(raw_mask_path.split('/')[6:10])
+                area_to_detect_data_path = os.path.join(area_head, area_tail, relabel_mask_name[:-4] + '.txt')
+                area_to_detect_list = []
+                with open(area_to_detect_data_path) as f:
+                    for line in f:
+                        inner_list = [int(elt.strip()) for elt in line.split(' ')]
+                        # in alternative, if you need to use the file content as numbers
+                        # inner_list = [int(elt.strip()) for elt in line.split(',')]
+                        area_to_detect_list.append(inner_list)
+                if len(area_to_detect_list) == 0:
+                    area_to_detect_list = None
+                
+                area_to_detect = area_to_detect_list
+                if area_to_detect is not None :
+                    out_resized_area = torch.zeros((1, 1, 64, 64))
+                    gt_resized_area = torch.zeros((1, 1, 64, 64))
+                    for _i in range(len(area_to_detect)):
+                        x_min, y_min, x_max, y_max = area_to_detect[_i]
+
+                        x_min = math.floor(x_min / 640 * 64)
+                        y_min = math.floor(y_min / 480 * 64)
+                        x_max = math.ceil(x_max / 640 * 64)
+                        y_max = math.ceil(y_max / 480 * 64)
+                        
+                        # clip pred
+                        out_resized_area[0, 0, y_min:y_max, x_min:x_max] = output[0, 0, y_min:y_max, x_min:x_max]
+
+                        # clip GT
+                        gt_resized_area[0, 0, y_min:y_max, x_min:x_max] = target_now[0, 0, y_min:y_max, x_min:x_max]
+                    
+                    output = out_resized_area
+                    target_now = gt_resized_area
+                    
+                else :
+                    pass
+
+
+
                 temp_iou = intersectionOverUnion(output.cpu(), target_now.cpu(), idx) # have not tested
                 iou_list.append(temp_iou)
                 score_map = output[-1].cpu() if type(output) == list else output.cpu()
             
-
                 if RELABEL:
                     # save in same checkpoint
                     raw_mask_path = meta['mask_path_list'][j][0]
@@ -536,8 +575,26 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                     else :
                         gt_mask_rgb = np.array(Image.open(raw_rgb_frame_path))
                     # print(input_now.shape)
-                    # print(score_map.shape)
-                    pred_batch_img, pred_mask = relabel_heatmap(input_now, score_map, 'pred') # return an Image object
+                    # print(score_map) # [1, 1, 64, 64]
+
+                    # 2020.7.1
+                    # load info about hide area
+                    # from faster rcnn
+                    area_head = '/home/s5078345/Affordance-Detection-on-Video/faster-rcnn.pytorch/data_affordance_bbox'
+                    area_tail = ('/').join(raw_mask_path.split('/')[6:10])
+                    area_to_detect_data_path = os.path.join(area_head, area_tail, relabel_mask_name[:-4] + '.txt')
+                    # print(area_to_use_data_path)
+                    area_to_detect_list = []
+                    with open(area_to_detect_data_path) as f:
+                        for line in f:
+                            inner_list = [int(elt.strip()) for elt in line.split(' ')]
+                            # in alternative, if you need to use the file content as numbers
+                            # inner_list = [int(elt.strip()) for elt in line.split(',')]
+                            area_to_detect_list.append(inner_list)
+                    if len(area_to_detect_list) == 0:
+                        area_to_detect_list = None
+                    # print(area_to_detect_list)
+                    pred_batch_img, pred_mask = relabel_heatmap(input_now, score_map, 'pred', area_to_detect = area_to_detect_list) # return an Image object
                     
                     if not isdir(relabel_mask_dir):
                         mkdir_p(relabel_mask_dir)
@@ -555,9 +612,7 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                     plt.plot()
                     index_name = "%05d.jpg" % (img_index)
                     plt.savefig(os.path.join(relabel_mask_dir, 'vis_' + index_name))
-                    pred_mask.save(os.path.join(relabel_mask_dir, index_name))
-                    print(relabel_mask_dir) 
-                    
+                    pred_mask.save(os.path.join(relabel_mask_dir, index_name)) 
 
             # measure accuracy and record loss
             losses.update(loss.item(), input.size(0))

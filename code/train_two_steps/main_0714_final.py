@@ -2,7 +2,7 @@
 Train step 1 on sad dataset.
 
 # training 
-python main_0428.py
+python main_0714_final.py
 # training using only 10 actions (for test)
 python main.py -t 
 
@@ -15,19 +15,8 @@ python main_0428.py --resume ./checkpoint_0612_8000_to_200/checkpoint_best_iou.p
 
 
 
+python main_0714_final.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
 
-
-
-# draw line chart (loss and IoU curve)
-python main.py --resume ./checkpoint/checkpoint_20.pth.tar -w
-
-# relabel train/test (visualize in same architecture)
-python main_0428.py --resume ./checkpoint_0428/checkpoint_best_iou.pth.tar -e -r
-
-python main_0428.py --resume ./checkpoint_0606_coco_fine_tune_step_1/checkpoint_best_iou.pth.tar -e -r
-
-# temp
-python main_0428.py --resume ./checkpoint_0606_coco_fine_tune_step_1/checkpoint_best_iou.pth.tar -e
 '''
 from __future__ import print_function, absolute_import
 
@@ -37,7 +26,7 @@ import time
 import matplotlib.pyplot as plt
 import random
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '1'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1'
 
 import torch
 import torch.nn.parallel
@@ -70,7 +59,7 @@ dataset_names = sorted(name for name in datasets.__dict__
 
 
 # init global variables
-best_iou = 0
+best_final_acc = 0
 output_res = None
 idx = []
 
@@ -113,7 +102,7 @@ def draw_line_chart(args, log_read_dir):
     plt.cla()
 
 def main(args):
-    global best_iou
+    global best_final_acc
     global idx
     global output_res
     output_res = args.out_res
@@ -136,7 +125,7 @@ def main(args):
     if args.test == True:
         args.train_batch = 4
         args.test_batch = 4
-        args.epochs = 20
+        args.epochs = 10
 
     if args.evaluate and args.relabel == False:
         args.test_batch = 10
@@ -146,16 +135,6 @@ def main(args):
         draw_line_chart(args, os.path.join(args.checkpoint, 'log.txt'))
         return
 
-    # idx is the index of joints used to compute accuracy
-    # if args.dataset in ['mpii', 'lsp']:
-    #     idx = [1,2,3,4,5,6,11,12,15,16]
-    # elif args.dataset == 'coco':
-    #     idx = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]
-    # elif args.dataset == 'sad' or args.dataset == 'sad_step_1':
-    #     idx = [1] # support affordance
-    # else:
-    #     print("Unknown dataset: {}".format(args.dataset))
-    #     assert False
     idx = [1]
 
     # create checkpoint dir
@@ -171,19 +150,14 @@ def main(args):
                                        num_classes=njoints,
                                        resnet_layers=args.resnet_layers)
 
-    # 2020.6.7
-    # freeze feature extraction and first one hg model paras
-    # freeze_list = [model.conv1, model.bn1, model.layer1, model.layer2, model.layer3, \
-    #     model.hg[0], model.res[0], model.fc[0], \
-    #     model.score[0],model.fc_[0], model.score_[0]]
-    # for freeze_layer in freeze_list :
-    #     for param in freeze_layer.parameters():
-    #         param.requires_grad = False
+
 
     model = torch.nn.DataParallel(model).to(device)
 
     # define loss function (criterion) and optimizer
-    criterion = losses.IoULoss().to(device)
+    criterion_iou = losses.IoULoss().to(device)
+    criterion_bce = losses.BCELoss().to(device)
+    criterions = [criterion_iou, criterion_bce]
 
     if args.solver == 'rms':
         optimizer = torch.optim.RMSprop(model.parameters(),
@@ -195,10 +169,6 @@ def main(args):
             model.parameters(),
             lr=args.lr,
         )
-        # optimizer = torch.optim.Adam(
-        #     filter(lambda p: p.requires_grad, model.parameters()),
-        #     lr=args.lr,
-        # )
     else:
         print('Unknown solver: {}'.format(args.solver))
         assert False
@@ -212,13 +182,16 @@ def main(args):
 
                 # start from epoch 0
                 args.start_epoch = 0
-                best_iou = 0
+                best_final_acc = 0
                 model.load_state_dict(checkpoint['state_dict'])
 
                 print("=> loaded checkpoint '{}' (epoch {})"
                     .format(args.resume, checkpoint['epoch']))
                 logger = Logger(join(args.checkpoint, 'log.txt'), title=title)
-                logger.set_names(['Epoch', 'LR', 'Train Loss', 'Val Loss', 'Val IoU'])
+                logger.set_names(['Epoch', 'LR', 'Train Attention Loss', 'Val Attention Loss', 'Val Attention Loss', \
+                    'Train Region Loss', 'Val Region Loss', 'Val Region IoU', \
+                    'Train Existence Acc', 'Val Existence Loss', 'Val Existence Acc', 'Val final acc'])
+
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
     elif args.resume:
@@ -230,7 +203,7 @@ def main(args):
 
             # start from epoch 0
             args.start_epoch = 0
-            best_iou = 0
+            best_final_acc = 0
 
             model.load_state_dict(checkpoint['state_dict'])
             print("=> loaded checkpoint '{}' (epoch {})"
@@ -241,7 +214,9 @@ def main(args):
             print("=> no checkpoint found at '{}'".format(args.resume))
     else:
         logger = Logger(join(args.checkpoint, 'log.txt'), title=title)
-        logger.set_names(['Epoch', 'LR', 'Train Loss', 'Val Loss', 'Val IoU'])
+        logger.set_names(['Epoch', 'LR', 'Train Attention Loss', 'Val Attention Loss', 'Val Attention IoU', \
+            'Train Region Loss', 'Val Region Loss', 'Val Region IoU', \
+            'Train Existence Acc', 'Val Existence Loss', 'Val Existence Acc', 'Val final acc'])
 
     print('    Total params: %.2fM'
           % (sum(p.numel() for p in model.parameters())/1000000.0))
@@ -255,11 +230,13 @@ def main(args):
     )
 
     '''
-    for i, (input, input_depth, target, meta) in enumerate(train_loader):
+    for i, (input, input_depth, target_heatmap, target_mask, target_label, meta) in enumerate(train_loader):
         print(len(input))
         print(input[0].shape)
         print(input_depth[0].shape)
-        print(target[0].shape)
+        print(target_heatmap[0].shape)
+        print(target_mask[0].shape)
+        print(target_label[0].shape)
         return
     '''
     
@@ -271,82 +248,91 @@ def main(args):
         num_workers=args.workers, pin_memory=True
     )
 
-    # redraw training / test label :
-    global RELABEL
-    if args.relabel:
-        RELABEL = True
-        if args.evaluate:
-            print('\nRelabel val label')
-            loss, iou, predictions = validate(val_loader, model, criterion, njoints,
-                                    args.checkpoint, args.debug, args.flip)
-            # Because test and val are all considered -> iou is uesless
-            # print("Val IoU: %.3f" % (iou))
-            return 
+    # # redraw training / test label :
+    # global RELABEL
+    # if args.relabel:
+    #     RELABEL = True
+    #     if args.evaluate:
+    #         print('\nRelabel val label')
+    #         loss, iou, predictions = validate(val_loader, model, criterion, njoints,
+    #                                 args.checkpoint, args.debug, args.flip)
+    #         # Because test and val are all considered -> iou is uesless
+    #         # print("Val IoU: %.3f" % (iou))
+    #         return 
 
-    # evaluation only
-    global JUST_EVALUATE
-    JUST_EVALUATE = False
-    if args.evaluate:
-        print('\nEvaluation only')
-        if args.debug :
-            print('Draw pred /gt heatmap')
-        JUST_EVALUATE = True
-        loss, iou, predictions = validate(val_loader, model, criterion, njoints,
-                                           args.checkpoint, args.debug, args.flip)
-        print("Val IoU: %.3f" % (iou))
-        return
+    # # evaluation only
+    # global JUST_EVALUATE
+    # JUST_EVALUATE = False
+    # if args.evaluate:
+    #     print('\nEvaluation only')
+    #     if args.debug :
+    #         print('Draw pred /gt heatmap')
+    #     JUST_EVALUATE = True
+    #     loss, iou, predictions = validate(val_loader, model, criterion, njoints,
+    #                                        args.checkpoint, args.debug, args.flip)
+    #     print("Val IoU: %.3f" % (iou))
+    #     return
 
     ## backup when training starts
     code_backup_dir = 'code_backup'
     mkdir_p(os.path.join(args.checkpoint, code_backup_dir))
-    os.system('cp ../affordance/models/hourglass.py %s/%s/hourglass.py' % (args.checkpoint, code_backup_dir))
-    os.system('cp ../affordance/datasets/sad.py %s/%s/sad.py' % (args.checkpoint, code_backup_dir))
+    os.system('cp ../affordance/models/hourglass_final.py %s/%s/hourglass_final.py' % (args.checkpoint, code_backup_dir))
+    os.system('cp ../affordance/datasets/sad_attention.py %s/%s/sad_attention.py' % (args.checkpoint, code_backup_dir))
     this_file_name = os.path.split(os.path.abspath(__file__))[1]
     os.system('cp ./%s %s' % (this_file_name, os.path.join(args.checkpoint, code_backup_dir, this_file_name)))
 
     # train and eval
     lr = args.lr
-    for epoch in range(args.start_epoch, args.epochs):        
+    for epoch in range(args.start_epoch, args.epochs):
         lr = adjust_learning_rate(optimizer, epoch, lr, args.schedule, args.gamma)
         print('\nEpoch: %d | LR: %.8f' % (epoch + 1, lr))
 
         # decay sigma
         if args.sigma_decay > 0:
-            train_loader.dataset.sigma *=  args.sigma_decay
-            val_loader.dataset.sigma *=  args.sigma_decay
+            train_loader.dataset.sigma *= args.sigma_decay
+            val_loader.dataset.sigma *= args.sigma_decay
 
         # train for one epoch
-        train_loss = train(train_loader, model, criterion, optimizer,
-                                      args.debug, args.flip)
+        train_att_loss, train_region_loss, train_existence_loss \
+            = train(train_loader, model, criterions, optimizer, args.debug, args.flip)
 
         # evaluate on validation set
-        valid_loss, valid_iou, predictions = validate(val_loader, model, criterion,
-                                                  njoints, args.checkpoint, args.debug, args.flip)
-        print("Val IoU: %.3f" % (valid_iou))
+        val_att_loss, val_att_iou, val_region_loss, val_region_iou, \
+            val_existence_loss, val_existence_acc , val_final_acc \
+                = validate(val_loader, model, criterions, njoints, args.checkpoint, args.debug, args.flip)
+        print("Val final acc: %.3f" % (val_final_acc))
 
         # append logger file
-        logger.append([epoch + 1, lr, train_loss, valid_loss, valid_iou])
+        logger.append([epoch + 1, lr, train_att_loss, val_att_loss, val_att_iou, \
+            train_region_loss, val_region_loss, val_region_iou, \
+            train_existence_loss, val_existence_loss, val_existence_acc, 
+            val_final_acc])
 
         # remember best acc and save checkpoint
-        is_best_iou = valid_iou > best_iou
-        best_iou = max(valid_iou, best_iou)
+        is_best_acc = val_final_acc > best_final_acc
+        best_final_acc = max(val_final_acc, best_final_acc)
         save_checkpoint({
             'epoch': epoch + 1,
             'arch': args.arch,
             'state_dict': model.state_dict(),
-            'best_iou': best_iou,
+            'best_iou': best_final_acc,
             'optimizer' : optimizer.state_dict(),
-        }, is_best_iou, checkpoint=args.checkpoint, snapshot=args.snapshot)
+        }, is_best_acc, checkpoint=args.checkpoint, snapshot=args.snapshot)
 
     logger.close()
 
-    print("Best iou = %.3f" % (best_iou))
-    # draw_line_chart(args, os.path.join(args.checkpoint, 'log.txt'))
+    print("Best val final acc = %.3f" % (best_final_acc))
 
-def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
+def train(train_loader, model, criterions, optimizer, debug=False, flip=True):
     batch_time = AverageMeter()
     data_time = AverageMeter()
-    losses = AverageMeter()
+    total_losses = AverageMeter()
+    heatmap_losses = AverageMeter()
+    mask_losses = AverageMeter()
+    label_losses = AverageMeter()
+
+    # Loss 
+    criterion_iou, criterion_bce = criterions
 
     # switch to train mode
     model.train()
@@ -355,64 +341,57 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
 
     gt_win, pred_win = None, None
     bar = Bar('Train', max=len(train_loader))
-    for i, (input, input_depth, target, meta) in enumerate(train_loader):
+    for i, (input, input_depth, target_heatmap, target_mask, target_label, meta) in enumerate(train_loader):
 
         # measure data loading time
         data_time.update(time.time() - end)
 
-        input, input_depth, target = input.to(device), input_depth.to(device), target.to(device, non_blocking=True)
-        # target_weight = meta['target_weight'].to(device, non_blocking=True)
+        input, input_depth, = input.to(device), input_depth.to(device)
+        target_heatmap, target_mask, target_label = target_heatmap.to(device, non_blocking=True), target_mask.to(device, non_blocking=True), \
+            target_label.to(device, non_blocking=True)
 
         batch_size = input.shape[0]
-        loss = 0
-        # store first two stack feature # 2 = first and second stack, 6 = video length
-        video_feature_cache = torch.zeros(batch_size, 6, 2, 256, output_res, output_res)
-        
-        with torch.no_grad():
-            # first compute
-            for j in range(6):
-                input_now = input[:, j] # [B, 3, 256, 256]
-                input_depth_now = input_depth[:, j]
-                target_now = target[:, j]
-                _, out_tsm_feature = model(torch.cat((input_now, input_depth_now), 1)) # [B, 4, 256, 256]
-                for k in range(2):
-                    video_feature_cache[:, j, k] = out_tsm_feature[k]
+        total_loss, heatmap_loss, mask_loss, label_loss = 0, 0, 0, 0
+        last_state = None
+        last_tsm_buffer = None
 
-            # TSM module
-            b, t, _, c, h, w = video_feature_cache.size()
-            fold_div = 8
-            fold = c // fold_div
-            new_tsm_feature = torch.zeros(batch_size, 6, 2, 256, output_res, output_res)
-            for j in range(2):
-                x = video_feature_cache[:, :, j]
-                temp = torch.zeros(batch_size, 6, 256, output_res, output_res)
-                temp[:, :-1, :fold] = x[:, 1:, :fold]  # shift left
-                temp[:, 1:, fold: 2 * fold] = x[:, :-1, fold: 2 * fold]  # shift right
-                temp[:, :, 2 * fold:] = x[:, :, 2 * fold:]  # not shift
-                new_tsm_feature[:, :, j] = temp
-
-        new_tsm_feature = new_tsm_feature.to(device)
-        # compute use TSM feature
         for j in range(6):
             input_now = input[:, j] # [B, 3, 256, 256]
-            input_depth_now = input_depth[:, j]
-            target_now = target[:, j]
-            output, _ = model(torch.cat((input_now, input_depth_now), 1), True, new_tsm_feature[:, j])
+            input_depth_now = input_depth[:, j] # [B, 1, 256, 256]
+            target_heatmap_now = target_heatmap[:, j] # [B, 1, 64, 64]
+            target_mask_now = target_mask[:, j] # [B, 1, 64, 64]
+            target_label_now = target_label[:, j] # [B, 1]
 
-            if type(output) == list:  # multiple output # beacuse of intermediate prediction
-                for o in output:
-                    loss += criterion(o, target_now)
-                output = output[-1]
-            else:  # single output
-                pass
-                # loss = criterion(output, target, target_weight)
-        
-        # # measure accuracy and record loss
-        losses.update(loss.item(), input.size(0))
+            if j == 0:
+                output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1))
+            else :
+                output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1), \
+                    input_state = last_state, tsm_input = last_tsm_buffer)
+            last_state = output_state
+            last_tsm_buffer = output_tsm
+
+            # Loss computation
+            for o_heatmap in output_heatmap:
+                temp = criterion_iou(o_heatmap, target_heatmap_now)
+                total_loss += temp
+                heatmap_loss += temp
+            for o_mask in output_mask:
+                temp = criterion_iou(o_mask, target_mask_now)
+                total_loss += temp
+                mask_loss += temp
+            temp = criterion_bce(output_label, target_label_now)
+            total_loss += temp
+            label_loss += temp
+
+        # measure accuracy and record loss
+        total_losses.update(total_loss.item(), input.size(0))
+        heatmap_losses.update(heatmap_loss.item(), input.size(0))
+        mask_losses.update(mask_loss.item(), input.size(0))
+        label_losses.update(label_loss.item(), input.size(0))
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
-        loss.backward()
+        total_loss.backward()
         optimizer.step()
 
         # measure elapsed time
@@ -427,21 +406,38 @@ def train(train_loader, model, criterion, optimizer, debug=False, flip=True):
                     bt=batch_time.val,
                     total=bar.elapsed_td,
                     eta=bar.eta_td,
-                    loss=losses.avg,
+                    loss=total_losses.avg,
                     )
         bar.next()
     bar.finish()
-    return losses.avg
+    return heatmap_losses.avg, mask_losses.avg, label_losses.avg
 
 
-def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False, flip=True):
+def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False, flip=True):
     batch_time = AverageMeter()
     data_time = AverageMeter()
-    losses = AverageMeter()
-    ioues = AverageMeter()
+    total_losses = AverageMeter()
+    heatmap_losses = AverageMeter()
+    mask_losses = AverageMeter()
+    label_losses = AverageMeter()
 
-    # predictions
-    predictions = torch.Tensor(val_loader.dataset.__len__(), num_classes, 2)
+    heatmap_ioues = AverageMeter()
+    mask_ioues = AverageMeter()
+    label_acces = AverageMeter()
+
+    # iou > 50% and step 2 labels are both right -> correcct
+    # if label is false (and pred is false too) -> correct
+    final_acces = AverageMeter() 
+
+    # for statistic
+    gt_trues = AverageMeter() # positive
+    gt_falses = AverageMeter() # negative
+    pred_trues = AverageMeter() # true == true and iou > 50%
+    pred_falses = AverageMeter()
+    pred_trues_first = AverageMeter() # true == true
+
+    # Loss
+    criterion_iou, criterion_bce = criterions
 
     # switch to evaluate mode
     model.eval()
@@ -451,66 +447,93 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
     end = time.time()
     bar = Bar('Eval ', max=len(val_loader))
     with torch.no_grad():
-        for i, (input, input_depth, target, meta) in enumerate(val_loader):
-            if RELABEL and i == 1 : break
+        for i, (input, input_depth, target_heatmap, target_mask, target_label, meta) in enumerate(val_loader):
+            # if RELABEL and i == 1 : break
 
             # measure data loading time
             data_time.update(time.time() - end)
 
-            input = input.to(device, non_blocking=True)
-            input_depth = input_depth.to(device, non_blocking=True)
-            target = target.to(device, non_blocking=True)
-            
+            input, input_depth, = input.to(device), input_depth.to(device)
+            target_heatmap, target_mask, target_label = target_heatmap.to(device, non_blocking=True), target_mask.to(device, non_blocking=True), \
+                target_label.to(device, non_blocking=True)
+
             batch_size = input.shape[0]
-            loss = 0
-            iou_list = []
+            total_loss, heatmap_loss, mask_loss, label_loss = 0, 0, 0, 0
+            last_state = None
+            last_tsm_buffer = None
+            heatmap_iou_list, mask_iou_list, label_acc_list = [], [], []
+            final_acc_list = []
 
-            # store first two stack feature # 2 = first and second stack, 6 = video length
-            video_feature_cache = torch.zeros(batch_size, 6, 2, 256, output_res, output_res)
+            # for statistic
+            gt_true_list, gt_false_list, pred_true_list, pred_false_list, pred_true_first_list = [], [], [], [], []
 
-            # first compute
             for j in range(6):
                 input_now = input[:, j] # [B, 3, 256, 256]
-                input_depth_now = input_depth[:, j]
-                target_now = target[:, j]
-                _, out_tsm_feature = model(torch.cat((input_now, input_depth_now), 1)) # [B, 4, 256, 256]
-                for k in range(2):
-                    video_feature_cache[:, j, k] = out_tsm_feature[k]
+                input_depth_now = input_depth[:, j] # [B, 1, 256, 256]
+                target_heatmap_now = target_heatmap[:, j] # [B, 1, 64, 64]
+                target_mask_now = target_mask[:, j] # [B, 1, 64, 64]
+                target_label_now = target_label[:, j] # [B, 1]
 
-            # TSM module
-            b, t, _, c, h, w = video_feature_cache.size()
-            fold_div = 8
-            fold = c // fold_div
-            new_tsm_feature = torch.zeros(batch_size, 6, 2, 256, output_res, output_res)
-            for j in range(2):
-                x = video_feature_cache[:, :, j]
-                temp = torch.zeros(batch_size, 6, 256, output_res, output_res)
-                temp[:, :-1, :fold] = x[:, 1:, :fold]  # shift left
-                temp[:, 1:, fold: 2 * fold] = x[:, :-1, fold: 2 * fold]  # shift right
-                temp[:, :, 2 * fold:] = x[:, :, 2 * fold:]  # not shift
-                new_tsm_feature[:, :, j] = temp
+                if j == 0:
+                    output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1))
+                else :
+                    output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1), \
+                        input_state = last_state, tsm_input = last_tsm_buffer)
+                last_state = output_state
+                last_tsm_buffer = output_tsm
 
-            new_tsm_feature = new_tsm_feature.to(device)
-            # compute use TSM feature
-            for j in range(6):
-                input_now = input[:, j] # [B, 3, 256, 256]
-                input_depth_now = input_depth[:, j]
-                target_now = target[:, j]
-                output, _ = model(torch.cat((input_now, input_depth_now), 1), True, new_tsm_feature[:, j])
+                # Loss computation
+                for o_heatmap in output_heatmap:
+                    temp = criterion_iou(o_heatmap, target_heatmap_now)
+                    total_loss += temp
+                    heatmap_loss += temp
+                for o_mask in output_mask:
+                    temp = criterion_iou(o_mask, target_mask_now)
+                    total_loss += temp
+                    mask_loss += temp
+                temp = criterion_bce(output_label, target_label_now)
+                total_loss += temp
+                label_loss += temp
 
-                if type(output) == list:  # multiple output # beacuse of intermediate prediction
-                    for o in output:
-                        loss += criterion(o, target_now)
-                    output = output[-1]
-                else:  # single output
-                    pass
+                # choose last one as prediction
+                output_heatmap = output_heatmap[-1]
+                output_mask = output_mask[-1]
 
-                # print(output.shape)
-                # print(target_now.shape)
-                temp_iou = intersectionOverUnion(output.cpu(), target_now.cpu(), idx) # have not tested
-                iou_list.append(temp_iou)
-                score_map = output[-1].cpu() if type(output) == list else output.cpu()
-            
+                # evaluation metric
+                heatmap_iou = intersectionOverUnion(output_heatmap.cpu(), target_heatmap_now.cpu(), idx)
+                heatmap_iou_list.append(heatmap_iou)
+                mask_iou = intersectionOverUnion(output_mask.cpu(), target_mask_now.cpu(), idx)
+                mask_iou_list.append(mask_iou)
+
+                round_output_label = torch.round(output_label).float()
+                label_acc = float((round_output_label == target_label_now).sum()) / batch_size
+                label_acc_list.append(label_acc)
+                
+                # score_map = output[-1].cpu() if type(output) == list else output.cpu()
+                
+                #########################
+                # final evuation accuracy
+                import numpy as np
+                temp_1 = (round_output_label == 1) & (target_label_now == 1) # positve label correct
+                temp_acc_1 = temp_1.cpu().numpy()
+                temp_2 = (round_output_label == 0) & (target_label_now == 0) # negative label correct
+                temp_acc_2 = temp_2.cpu().numpy()
+                
+                final_pred_1 = np.logical_and(temp_acc_1, mask_iou > 0.5) # positve label correct + iou > 50%
+                final_pred_2 = temp_acc_2 # negative label correct
+                final_acc = np.logical_or(final_pred_1, final_pred_2)
+                final_acc_list.append(np.sum(final_acc) / batch_size)
+
+                # for statistic
+                temp_1 = (target_label_now == 1).cpu().numpy()
+                temp_2 = (target_label_now == 0).cpu().numpy()
+                gt_true_list.append(np.sum(temp_1) / batch_size)
+                gt_false_list.append(np.sum(temp_2) / batch_size)
+
+                pred_true_list.append(np.sum(final_pred_1) / batch_size)
+                pred_false_list.append(np.sum(final_pred_2) / batch_size)
+                pred_true_first_list.append(np.sum(temp_acc_1) / batch_size)
+                ###############################
 
                 if RELABEL:
                     # save in same checkpoint
@@ -558,11 +581,26 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                     pred_mask.save(os.path.join(relabel_mask_dir, index_name))
                     print(relabel_mask_dir) 
                     
+            # record final acc
+            final_acces.update(sum(final_acc_list) / len(final_acc_list), input.size(0))
 
-            # measure accuracy and record loss
-            losses.update(loss.item(), input.size(0))
-            # acces.update(acc[0], input.size(0))
-            ioues.update(sum(iou_list) / len(iou_list), input.size(0))
+            # for statistic
+            gt_trues.update(sum(gt_true_list) / len(gt_true_list), input.size(0))
+            gt_falses.update(sum(gt_false_list) / len(gt_false_list), input.size(0))
+            pred_trues.update(sum(pred_true_list) / len(pred_true_list), input.size(0))
+            pred_falses.update(sum(pred_false_list) / len(pred_false_list), input.size(0))
+            pred_trues_first.update(sum(pred_true_first_list) / len(pred_true_first_list), input.size(0))
+
+            # record loss
+            total_losses.update(total_loss.item(), input.size(0))
+            heatmap_losses.update(heatmap_loss.item(), input.size(0))
+            mask_losses.update(mask_loss.item(), input.size(0))
+            label_losses.update(label_loss.item(), input.size(0))
+
+            # record metric
+            heatmap_ioues.update(sum(heatmap_iou_list) / len(heatmap_iou_list), input.size(0))
+            mask_ioues.update(sum(mask_iou_list) / len(mask_iou_list), input.size(0))
+            label_acces.update(sum(label_acc_list) / len(label_acc_list), input.size(0))
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -576,15 +614,31 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                         bt=batch_time.avg,
                         total=bar.elapsed_td,
                         eta=bar.eta_td,
-                        loss=losses.avg
+                        loss=total_losses.avg
                         )
             bar.next()
         bar.finish()
-    return losses.avg, ioues.avg, predictions
+
+    # # for statistic
+    # print("GT true : %.3f" % (gt_trues.avg))
+    # print("GT false : %.3f" % (gt_falses.avg))
+    # print("Pred true : %.3f" % (pred_trues.avg))
+    # print("Pred false : %.3f" % (pred_falses.avg))
+    # print("====")
+    # print("Pred true (no considering IoU) : %.3f" % (pred_trues_first.avg))
+    # print("IoU > 50 percent accuracy : %.3f" % (pred_trues.avg / pred_trues_first.avg))
+    # print("===")
+    # print("True part : %.3f acc, False part : %.3f acc" % (pred_trues.avg / gt_trues.avg, pred_falses.avg / gt_falses.avg))
+    # print("Predict true label correct : %.3f" % (pred_trues_first.avg / gt_trues.avg))
+
+    return heatmap_losses.avg, heatmap_ioues.avg, \
+        mask_losses.avg, mask_ioues.avg, \
+        label_losses.avg, label_acces.avg, \
+        final_acces.avg
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-    parser.add_argument('--dataset', metavar='DATASET', default='sad_step_1',
+    parser.add_argument('--dataset', metavar='DATASET', default='sad_attention',
                         choices=dataset_names,
                         help='Datasets: ' +
                             ' | '.join(dataset_names) +
@@ -611,12 +665,12 @@ if __name__ == '__main__':
                     help='dir of train/test data list')
 
     # Model structure
-    parser.add_argument('--arch', '-a', metavar='ARCH', default='hg',
+    parser.add_argument('--arch', '-a', metavar='ARCH', default='hg_final',
                         choices=model_names,
                         help='model architecture: ' +
                             ' | '.join(model_names) +
                             ' (default: hg)')
-    parser.add_argument('-s', '--stacks', default=4, type=int, metavar='N',
+    parser.add_argument('-s', '--stacks', default=2, type=int, metavar='N',
                         help='Number of hourglasses to stack')
     parser.add_argument('--features', default=256, type=int, metavar='N',
                         help='Number of features in the hourglass')
@@ -637,9 +691,9 @@ if __name__ == '__main__':
                         help='manual epoch number (useful on restarts)')
 
     # 2 GPU setting
-    parser.add_argument('--train-batch', default=8, type=int, metavar='N',
+    parser.add_argument('--train-batch', default=4, type=int, metavar='N',
                         help='train batchsize')
-    parser.add_argument('--test-batch', default=8, type=int, metavar='N',
+    parser.add_argument('--test-batch', default=4, type=int, metavar='N',
                         help='train batchsize')
 
     # 1 GPU setting
@@ -673,7 +727,7 @@ if __name__ == '__main__':
     # Miscs
     parser.add_argument('-c', '--checkpoint', default='checkpoint', type=str, metavar='PATH',
                         help='path to save checkpoint (default: checkpoint)')
-    parser.add_argument('--snapshot', default=20, type=int,
+    parser.add_argument('--snapshot', default=10, type=int,
                         help='save models for every #snapshot epochs (default: 0)')
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='path to latest checkpoint (default: none)')
