@@ -1,10 +1,16 @@
 '''
-Train step 1 on sad dataset.
+Copy from main_0714_final.py
+1. metric : IoU and accuracy
+    save checkpoint : two + the most high
+
+2. train / infernece : 
+    when predicting negative label : region output = all black
+
 
 # training 
-python main_0714_final.py
+python main_0720_metric.py
 # training using only 10 actions (for test)
-python main.py -t 
+python main.py -t
 
 # resume training from checkpoint
 python main_0428.py --resume ./checkpoint_0605_coco_all_step_1/checkpoint_best_iou.pth.tar
@@ -14,7 +20,7 @@ python main_0428.py --resume ./checkpoint_0605_coco_all_step_1/checkpoint_best_i
 python main_0428.py --resume ./checkpoint_0612_8000_to_200/checkpoint_best_iou.pth.tar -p
 
 
-python main_0714_final.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e
+python main_0720_metric.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e
 
 '''
 from __future__ import print_function, absolute_import
@@ -270,7 +276,9 @@ def main(args):
         val_att_loss, val_att_iou, val_region_loss, val_region_iou, \
             val_existence_loss, val_existence_acc , val_final_acc \
                 = validate(val_loader, model, criterions, njoints, args.checkpoint, args.debug, args.flip)
-        print("Val final acc: %.3f" % (val_final_acc))
+        print("Val region IoU: %.3f" % (val_region_iou))
+        print("Val label acc: %.3f" % (val_existence_acc))
+        val_final_acc = val_region_iou + val_existence_acc
 
         # append logger file
         logger.append([epoch + 1, lr, train_att_loss, val_att_loss, val_att_iou, \
@@ -340,10 +348,20 @@ def train(train_loader, model, criterions, optimizer, debug=False, flip=True):
             last_state = output_state
             last_tsm_buffer = output_tsm
 
+            ## if label predict negative : make that mask all black
+            round_output_label = torch.round(output_label).float() # [B, 1]
+            # print(output_mask[0].shape) # [B, 1, 64, 64]
+
+            # print(round_output_label)
+            # print(round_output_label == 0)
+            for o_mask in output_mask:
+                # print(o_mask[round_output_label == 1].shape)
+                o_mask[round_output_label == 0] = 0
+
+
             # Loss computation
             for o_heatmap in output_heatmap:
                 temp = criterion_iou(o_heatmap, target_heatmap_now) * 0.3 + criterion_bce(o_heatmap, target_heatmap_now) * 0.3 # test now
-                # temp = criterion_iou(o_heatmap, target_heatmap_now) * 0.3
                 total_loss += temp
                 heatmap_loss += temp
             for o_mask in output_mask:
@@ -453,10 +471,15 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
                 last_state = output_state
                 last_tsm_buffer = output_tsm
 
+
+                ## if label predict negative : make that mask all black
+                round_output_label = torch.round(output_label).float() # [B, 1]
+                for o_mask in output_mask:
+                    o_mask[round_output_label == 0] = 0
+
                 # Loss computation
                 for o_heatmap in output_heatmap:
                     temp = criterion_iou(o_heatmap, target_heatmap_now) * 0.3 + criterion_bce(o_heatmap, target_heatmap_now) * 0.3
-                    # temp = criterion_iou(o_heatmap, target_heatmap_now) * 0.3 
                     total_loss += temp
                     heatmap_loss += temp
                 for o_mask in output_mask:
@@ -615,14 +638,7 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
 
     if JUST_EVALUATE :
         # for statistic
-        print("Composition of GT label :")
-        print("     Positive : %.3f" % (gt_trues.avg))
-        print("     Negative : %.3f" % (gt_falses.avg))
-        print("Composition of predicted results:")
-        print("     Positive part : %.3f acc (%.3f of 60 pa)" % (pred_trues.avg / gt_trues.avg, pred_trues.avg / gt_trues.avg * gt_trues.avg))
-        print("         Predict positive label correct : %.3f (%.3f of 60 pa)" % (pred_trues_first.avg / gt_trues.avg, pred_trues_first.avg))
-        print("         IoU > 50 pa : %.3f" % (pred_trues.avg / pred_trues_first.avg))
-        print("     Negative part : %.3f acc (%.3f of 40 pa)" % (pred_falses.avg / gt_falses.avg, pred_falses.avg))
+        pass
 
     return heatmap_losses.avg, heatmap_ioues.avg, \
         mask_losses.avg, mask_ioues.avg, \
@@ -720,7 +736,7 @@ if __name__ == '__main__':
     # Miscs
     parser.add_argument('-c', '--checkpoint', default='checkpoint', type=str, metavar='PATH',
                         help='path to save checkpoint (default: checkpoint)')
-    parser.add_argument('--snapshot', default=10, type=int,
+    parser.add_argument('--snapshot', default=5, type=int,
                         help='save models for every #snapshot epochs (default: 0)')
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='path to latest checkpoint (default: none)')

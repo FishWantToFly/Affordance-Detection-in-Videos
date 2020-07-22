@@ -2,7 +2,7 @@
 Train step 1 on sad dataset.
 
 # training 
-python main_0714_final.py
+python main_0715_remove_attention.py
 # training using only 10 actions (for test)
 python main.py -t 
 
@@ -270,7 +270,9 @@ def main(args):
         val_att_loss, val_att_iou, val_region_loss, val_region_iou, \
             val_existence_loss, val_existence_acc , val_final_acc \
                 = validate(val_loader, model, criterions, njoints, args.checkpoint, args.debug, args.flip)
-        print("Val final acc: %.3f" % (val_final_acc))
+        print("Val region IoU: %.3f" % (val_region_iou))
+        print("Val label acc: %.3f" % (val_existence_acc))
+        val_final_acc = val_region_iou + val_existence_acc
 
         # append logger file
         logger.append([epoch + 1, lr, train_att_loss, val_att_loss, val_att_iou, \
@@ -333,19 +335,23 @@ def train(train_loader, model, criterions, optimizer, debug=False, flip=True):
             target_label_now = target_label[:, j] # [B, 1]
 
             if j == 0:
-                output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1))
+                output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1))
             else :
-                output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1), \
+                output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1), \
                     input_state = last_state, tsm_input = last_tsm_buffer)
             last_state = output_state
             last_tsm_buffer = output_tsm
 
-            # Loss computation
-            for o_heatmap in output_heatmap:
-                temp = criterion_iou(o_heatmap, target_heatmap_now) * 0.3 + criterion_bce(o_heatmap, target_heatmap_now) * 0.3 # test now
-                # temp = criterion_iou(o_heatmap, target_heatmap_now) * 0.3
-                total_loss += temp
-                heatmap_loss += temp
+            ## if label predict negative : make that mask all black
+            round_output_label = torch.round(output_label).float() # [B, 1]
+            # print(output_mask[0].shape) # [B, 1, 64, 64]
+
+            # print(round_output_label)
+            # print(round_output_label == 0)
+            for o_mask in output_mask:
+                # print(o_mask[round_output_label == 1].shape)
+                o_mask[round_output_label == 0] = 0
+
             for o_mask in output_mask:
                 temp = criterion_iou(o_mask, target_mask_now)
                 total_loss += temp
@@ -356,7 +362,7 @@ def train(train_loader, model, criterions, optimizer, debug=False, flip=True):
 
         # measure accuracy and record loss
         total_losses.update(total_loss.item(), input.size(0))
-        heatmap_losses.update(heatmap_loss.item(), input.size(0))
+        # heatmap_losses.update(heatmap_loss.item(), input.size(0))
         mask_losses.update(mask_loss.item(), input.size(0))
         label_losses.update(label_loss.item(), input.size(0))
 
@@ -381,7 +387,7 @@ def train(train_loader, model, criterions, optimizer, debug=False, flip=True):
                     )
         bar.next()
     bar.finish()
-    return heatmap_losses.avg, mask_losses.avg, label_losses.avg
+    return 1, mask_losses.avg, label_losses.avg
 
 
 def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False, flip=True):
@@ -446,19 +452,24 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
                 target_label_now = target_label[:, j] # [B, 1]
 
                 if j == 0:
-                    output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1))
+                    output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1))
                 else :
-                    output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1), \
+                    output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1), \
                         input_state = last_state, tsm_input = last_tsm_buffer)
                 last_state = output_state
                 last_tsm_buffer = output_tsm
 
+                ## if label predict negative : make that mask all black
+                round_output_label = torch.round(output_label).float() # [B, 1]
+                for o_mask in output_mask:
+                    o_mask[round_output_label == 0] = 0
+
                 # Loss computation
-                for o_heatmap in output_heatmap:
-                    temp = criterion_iou(o_heatmap, target_heatmap_now) * 0.3 + criterion_bce(o_heatmap, target_heatmap_now) * 0.3
-                    # temp = criterion_iou(o_heatmap, target_heatmap_now) * 0.3 
-                    total_loss += temp
-                    heatmap_loss += temp
+                # for o_heatmap in output_heatmap:
+                #     temp = criterion_iou(o_heatmap, target_heatmap_now) # experiemnt
+                #     # temp = criterion_bce(o_heatmap, target_heatmap_now) 
+                #     total_loss += temp
+                #     heatmap_loss += temp
                 for o_mask in output_mask:
                     temp = criterion_iou(o_mask, target_mask_now)
                     total_loss += temp
@@ -468,13 +479,13 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
                 label_loss += temp
 
                 # choose last one as prediction
-                output_heatmap = output_heatmap[-1]
+                # output_heatmap = output_heatmap[-1]
                 output_mask = output_mask[-1]
 
                 # evaluation metric
                 # heatmap_iou = intersectionOverUnion(output_heatmap.cpu(), target_heatmap_now.cpu(), idx, mode = 'heatmap') 
-                heatmap_iou = intersectionOverUnion(output_heatmap.cpu(), target_heatmap_now.cpu(), idx) # experiemnt
-                heatmap_iou_list.append(heatmap_iou)
+                # heatmap_iou = intersectionOverUnion(output_heatmap.cpu(), target_heatmap_now.cpu(), idx) # experiemnt
+                # heatmap_iou_list.append(heatmap_iou)
                 mask_iou = intersectionOverUnion(output_mask.cpu(), target_mask_now.cpu(), idx, return_list = True)
                 mask_iou_list.append((sum(mask_iou) / len(mask_iou))[0])
 
@@ -587,12 +598,12 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
 
             # record loss
             total_losses.update(total_loss.item(), input.size(0))
-            heatmap_losses.update(heatmap_loss.item(), input.size(0))
+            # heatmap_losses.update(heatmap_loss.item(), input.size(0))
             mask_losses.update(mask_loss.item(), input.size(0))
             label_losses.update(label_loss.item(), input.size(0))
 
             # record metric
-            heatmap_ioues.update(sum(heatmap_iou_list) / len(heatmap_iou_list), input.size(0))
+            # heatmap_ioues.update(sum(heatmap_iou_list) / len(heatmap_iou_list), input.size(0))
             mask_ioues.update(sum(mask_iou_list) / len(mask_iou_list), input.size(0))
             label_acces.update(sum(label_acc_list) / len(label_acc_list), input.size(0))
 
@@ -619,12 +630,12 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
         print("     Positive : %.3f" % (gt_trues.avg))
         print("     Negative : %.3f" % (gt_falses.avg))
         print("Composition of predicted results:")
-        print("     Positive part : %.3f acc (%.3f of 60 pa)" % (pred_trues.avg / gt_trues.avg, pred_trues.avg / gt_trues.avg * gt_trues.avg))
+        print("     Positive part : %.3f acc (%.3f of 60 pa)" % (pred_trues.avg / gt_trues.avg, pred_trues_first.avg / gt_trues.avg))
         print("         Predict positive label correct : %.3f (%.3f of 60 pa)" % (pred_trues_first.avg / gt_trues.avg, pred_trues_first.avg))
         print("         IoU > 50 pa : %.3f" % (pred_trues.avg / pred_trues_first.avg))
         print("     Negative part : %.3f acc (%.3f of 40 pa)" % (pred_falses.avg / gt_falses.avg, pred_falses.avg))
 
-    return heatmap_losses.avg, heatmap_ioues.avg, \
+    return 1, heatmap_ioues.avg, \
         mask_losses.avg, mask_ioues.avg, \
         label_losses.avg, label_acces.avg, \
         final_acces.avg
@@ -720,7 +731,7 @@ if __name__ == '__main__':
     # Miscs
     parser.add_argument('-c', '--checkpoint', default='checkpoint', type=str, metavar='PATH',
                         help='path to save checkpoint (default: checkpoint)')
-    parser.add_argument('--snapshot', default=10, type=int,
+    parser.add_argument('--snapshot', default=4, type=int,
                         help='save models for every #snapshot epochs (default: 0)')
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='path to latest checkpoint (default: none)')
