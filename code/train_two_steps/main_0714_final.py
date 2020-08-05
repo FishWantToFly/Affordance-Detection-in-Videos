@@ -14,7 +14,7 @@ python main_0428.py --resume ./checkpoint_0605_coco_all_step_1/checkpoint_best_i
 python main_0428.py --resume ./checkpoint_0612_8000_to_200/checkpoint_best_iou.pth.tar -p
 
 
-python main_0714_final.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e
+python main_0714_final.py --resume ./checkpoint_0714_final_1.3/checkpoint_best_iou.pth.tar -e -r
 
 '''
 from __future__ import print_function, absolute_import
@@ -216,17 +216,18 @@ def main(args):
         num_workers=args.workers, pin_memory=True
     )
 
-    # # redraw training / test label :
-    # global RELABEL
-    # if args.relabel:
-    #     RELABEL = True
-    #     if args.evaluate:
-    #         print('\nRelabel val label')
-    #         loss, iou, predictions = validate(val_loader, model, criterion, njoints,
-    #                                 args.checkpoint, args.debug, args.flip)
-    #         # Because test and val are all considered -> iou is uesless
-    #         # print("Val IoU: %.3f" % (iou))
-    #         return 
+    # redraw training / test label :
+    global RELABEL
+    if args.relabel:
+        RELABEL = True
+        if args.evaluate:
+            print('\nRelabel val label')
+            val_att_loss, val_att_iou, val_region_loss, val_region_iou, \
+                val_existence_loss, val_existence_acc , val_final_acc \
+                = validate(val_loader, model, criterions, njoints, args.checkpoint, args.debug, args.flip)
+            # Because test and val are all considered -> iou is uesless
+            # print("Val IoU: %.3f" % (iou))
+            return 
 
     # evaluation only
     global JUST_EVALUATE
@@ -419,7 +420,7 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
     bar = Bar('Eval ', max=len(val_loader))
     with torch.no_grad():
         for i, (input, input_depth, target_heatmap, target_mask, target_label, meta) in enumerate(val_loader):
-            # if RELABEL and i == 1 : break
+            if RELABEL and i == 10 : break
 
             # measure data loading time
             data_time.update(time.time() - end)
@@ -453,6 +454,9 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
                 last_state = output_state
                 last_tsm_buffer = output_tsm
 
+                # temp = output_mask[-1]
+                # print(temp[temp > 0.5])
+
                 # Loss computation
                 for o_heatmap in output_heatmap:
                     temp = criterion_iou(o_heatmap, target_heatmap_now) * 0.3 + criterion_bce(o_heatmap, target_heatmap_now) * 0.3
@@ -483,6 +487,7 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
                 label_acc_list.append(label_acc)
                 
                 # score_map = output[-1].cpu() if type(output) == list else output.cpu()
+                score_map_mask = output_mask.cpu()
                 
                 #########################
                 # final evuation accuracy
@@ -554,7 +559,7 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
                         gt_mask_rgb = np.array(Image.open(raw_rgb_frame_path))
                     # print(input_now.shape)
                     # print(score_map.shape)
-                    pred_batch_img, pred_mask = relabel_heatmap(input_now, score_map, 'pred') # return an Image object
+                    pred_batch_img, pred_mask = relabel_heatmap(input_now.cpu(), score_map_mask, 'pred') # return an Image object
                     
                     if not isdir(relabel_mask_dir):
                         mkdir_p(relabel_mask_dir)

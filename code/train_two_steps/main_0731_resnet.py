@@ -1,14 +1,12 @@
 '''
-Copy from main_0714_final.py
-1. metric : IoU and accuracy
-    save checkpoint : two + the most high
+Copy from main_0720_metric.py
+Using resnet-50 to extract feature (as feature extraction)
 
-2. train / infernece : 
-    when predicting negative label : region output = all black
-
+Model : hg_resnet
+Dataset : sad_resnet
 
 # training 
-python main_0720_metric.py
+python main_0731_resnet.py
 # training using only 10 actions (for test)
 python main.py -t
 
@@ -33,7 +31,7 @@ import time
 import matplotlib.pyplot as plt
 import random
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 import torch
 import torch.nn.parallel
@@ -345,17 +343,23 @@ def train(train_loader, model, criterions, optimizer, debug=False, flip=True):
             target_label_now = target_label[:, j] # [B, 1]
 
             if j == 0:
-                output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1))
+                output_heatmap, output_mask, output_label, output_state, output_tsm = model(input_now)
             else :
-                output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1), \
+                output_heatmap, output_mask, output_label, output_state, output_tsm = model(input_now, \
                     input_state = last_state, tsm_input = last_tsm_buffer)
+            # if j == 0:
+            #     output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1))
+            # else :
+            #     output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1), \
+            #         input_state = last_state, tsm_input = last_tsm_buffer)
+
             last_state = output_state
             last_tsm_buffer = output_tsm
 
             ## if label predict negative : make that mask all black
-            round_output_label = torch.round(output_label).float() # [B, 1]
-            for o_mask in output_mask:
-                o_mask[round_output_label == 0] = 0
+            # round_output_label = torch.round(output_label).float() # [B, 1]
+            # for o_mask in output_mask:
+            #     o_mask[round_output_label == 0] = 0
 
 
             # Loss computation
@@ -463,9 +467,9 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
                 target_label_now = target_label[:, j] # [B, 1]
 
                 if j == 0:
-                    output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1))
+                    output_heatmap, output_mask, output_label, output_state, output_tsm = model(input_now)
                 else :
-                    output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1), \
+                    output_heatmap, output_mask, output_label, output_state, output_tsm = model(input_now, \
                         input_state = last_state, tsm_input = last_tsm_buffer)
                 last_state = output_state
                 last_tsm_buffer = output_tsm
@@ -474,9 +478,9 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
                 # print(temp[temp > 0.5])
 
                 ## if label predict negative : make that mask all black
-                round_output_label = torch.round(output_label).float() # [B, 1]
-                for o_mask in output_mask:
-                    o_mask[round_output_label == 0] = 0
+                # round_output_label = torch.round(output_label).float() # [B, 1]
+                # for o_mask in output_mask:
+                #     o_mask[round_output_label == 0] = 0
                 
 
                 # Loss computation
@@ -646,7 +650,7 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-    parser.add_argument('--dataset', metavar='DATASET', default='sad_attention',
+    parser.add_argument('--dataset', metavar='DATASET', default='sad_resnet',
                         choices=dataset_names,
                         help='Datasets: ' +
                             ' | '.join(dataset_names) +
@@ -673,7 +677,7 @@ if __name__ == '__main__':
                     help='dir of train/test data list')
 
     # Model structure
-    parser.add_argument('--arch', '-a', metavar='ARCH', default='hg_final',
+    parser.add_argument('--arch', '-a', metavar='ARCH', default='hg_resnet',
                         choices=model_names,
                         help='model architecture: ' +
                             ' | '.join(model_names) +
@@ -699,16 +703,16 @@ if __name__ == '__main__':
                         help='manual epoch number (useful on restarts)')
 
     # 2 GPU setting
-    parser.add_argument('--train-batch', default=8, type=int, metavar='N',
-                        help='train batchsize')
-    parser.add_argument('--test-batch', default=8, type=int, metavar='N',
-                        help='train batchsize')
+    # parser.add_argument('--train-batch', default=10, type=int, metavar='N',
+    #                     help='train batchsize')
+    # parser.add_argument('--test-batch', default=10, type=int, metavar='N',
+    #                     help='train batchsize')
 
-    # 1 GPU setting
-    # parser.add_argument('--train-batch', default=4, type=int, metavar='N',
-    #                     help='train batchsize')
-    # parser.add_argument('--test-batch', default=4, type=int, metavar='N',
-    #                     help='train batchsize')
+    # 1 GPU setting + ResNet-50
+    parser.add_argument('--train-batch', default=5, type=int, metavar='N',
+                        help='train batchsize')
+    parser.add_argument('--test-batch', default=5, type=int, metavar='N',
+                        help='train batchsize')
 
 
     parser.add_argument('--lr', '--learning-rate', default=2e-4, type=float,

@@ -505,6 +505,9 @@ def validate(val_loader, model, criterion, num_classes, checkpoint, debug=False,
                 else:  # single output
                     pass
 
+
+                print(output[output > 0.5])
+
                 # print(output.shape)
                 # print(target_now.shape)
                 temp_iou = intersectionOverUnion(output.cpu(), target_now.cpu(), idx) # have not tested

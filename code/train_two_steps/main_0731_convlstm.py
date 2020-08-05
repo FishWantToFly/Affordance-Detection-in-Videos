@@ -1,28 +1,18 @@
 '''
-Copy from main_0714_final.py
-1. metric : IoU and accuracy
-    save checkpoint : two + the most high
-
-2. train / infernece : 
-    when predicting negative label : region output = all black
+copy from main_0720_metric.py
+Also use convLSTM for heatmap prediction
 
 
 # training 
-python main_0720_metric.py
+python main_0722.py
 # training using only 10 actions (for test)
 python main.py -t
 
-# resume training from checkpoint
-python main_0428.py --resume ./checkpoint_0605_coco_all_step_1/checkpoint_best_iou.pth.tar
-# resume pre-training from checkpoint
-python main_0428.py --resume ./checkpoint_0605_coco_all_step_1/checkpoint_best_iou.pth.tar -p
-
-python main_0428.py --resume ./checkpoint_0612_8000_to_200/checkpoint_best_iou.pth.tar -p
 
 
-python main_0720_metric.py --resume ./checkpoint_0720/checkpoint_best_iou.pth.tar -e -r -> use heatmap
+python main_0722.py --resume ./checkpoint_0720/checkpoint_best_iou.pth.tar -e
 
-python main_0720_metric.py --resume ./checkpoint_0720_ablation_5/checkpoint_5.pth.tar -e -r
+python main_0722.py --resume ./checkpoint/checkpoint_best_iou.pth.tar -e -r
 
 '''
 from __future__ import print_function, absolute_import
@@ -334,7 +324,7 @@ def train(train_loader, model, criterions, optimizer, debug=False, flip=True):
 
         batch_size = input.shape[0]
         total_loss, heatmap_loss, mask_loss, label_loss = 0, 0, 0, 0
-        last_state = None
+        last_state_1, last_state = None, None
         last_tsm_buffer = None
 
         for j in range(6):
@@ -345,17 +335,18 @@ def train(train_loader, model, criterions, optimizer, debug=False, flip=True):
             target_label_now = target_label[:, j] # [B, 1]
 
             if j == 0:
-                output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1))
+                output_heatmap, output_mask, output_label, output_state_1, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1))
             else :
-                output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1), \
-                    input_state = last_state, tsm_input = last_tsm_buffer)
+                output_heatmap, output_mask, output_label, output_state_1, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1), \
+                    input_state_1 = last_state_1, input_state = last_state, tsm_input = last_tsm_buffer)
+            last_state_1 = output_state_1
             last_state = output_state
             last_tsm_buffer = output_tsm
 
-            ## if label predict negative : make that mask all black
             round_output_label = torch.round(output_label).float() # [B, 1]
             for o_mask in output_mask:
                 o_mask[round_output_label == 0] = 0
+
 
 
             # Loss computation
@@ -364,7 +355,7 @@ def train(train_loader, model, criterions, optimizer, debug=False, flip=True):
                 total_loss += temp
                 heatmap_loss += temp
             for o_mask in output_mask:
-                temp = criterion_iou(o_mask, target_mask_now)
+                temp = criterion_iou(o_mask, target_mask_now) + criterion_bce(o_mask, target_mask_now)
                 total_loss += temp
                 mask_loss += temp
             temp = criterion_bce(output_label, target_label_now)
@@ -447,7 +438,7 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
 
             batch_size = input.shape[0]
             total_loss, heatmap_loss, mask_loss, label_loss = 0, 0, 0, 0
-            last_state = None
+            last_state_1, last_state = None, None
             last_tsm_buffer = None
             heatmap_iou_list, mask_iou_list, label_acc_list = [], [], []
             final_acc_list = []
@@ -462,22 +453,19 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
                 target_mask_now = target_mask[:, j] # [B, 1, 64, 64]
                 target_label_now = target_label[:, j] # [B, 1]
 
+                # print(target_label_now)
                 if j == 0:
-                    output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1))
+                    output_heatmap, output_mask, output_label, output_state_1, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1))
                 else :
-                    output_heatmap, output_mask, output_label, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1), \
-                        input_state = last_state, tsm_input = last_tsm_buffer)
+                    output_heatmap, output_mask, output_label, output_state_1, output_state, output_tsm = model(torch.cat((input_now, input_depth_now), 1), \
+                        input_state_1 = last_state_1, input_state = last_state, tsm_input = last_tsm_buffer)
+                last_state_1 = output_state_1
                 last_state = output_state
                 last_tsm_buffer = output_tsm
 
-                # temp = output_heatmap[-1]
-                # print(temp[temp > 0.5])
-
-                ## if label predict negative : make that mask all black
                 round_output_label = torch.round(output_label).float() # [B, 1]
                 for o_mask in output_mask:
                     o_mask[round_output_label == 0] = 0
-                
 
                 # Loss computation
                 for o_heatmap in output_heatmap:
@@ -485,7 +473,7 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
                     total_loss += temp
                     heatmap_loss += temp
                 for o_mask in output_mask:
-                    temp = criterion_iou(o_mask, target_mask_now)
+                    temp = criterion_iou(o_mask, target_mask_now) + criterion_bce(o_mask, target_mask_now)
                     total_loss += temp
                     mask_loss += temp
                 temp = criterion_bce(output_label, target_label_now)
@@ -506,8 +494,10 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
                 label_acc = float((round_output_label == target_label_now).sum()) / batch_size
                 label_acc_list.append(label_acc)
                 
+
                 score_map_mask = output_mask.cpu()
                 # score_map_mask = output_heatmap.cpu()
+                # print((sum(mask_iou) / len(mask_iou))[0])
                 
                 #########################
                 # final evuation accuracy
@@ -521,6 +511,8 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
                 final_pred_2 = temp_acc_2 # negative label correct
                 final_acc = np.logical_or(final_pred_1, final_pred_2)
                 final_acc_list.append(np.sum(final_acc) / batch_size)
+
+
 
                 # for statistic
                 temp_1 = (target_label_now == 1).cpu().numpy()
@@ -558,8 +550,8 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
                         gt_mask_rgb = np.array(Image.open(raw_rgb_frame_path))
                     # print(input_now.shape)
                     # print(score_map.shape)
-                    pred_batch_img, pred_mask = relabel_heatmap(input_now.cpu(), score_map_mask, 'pred') #
-                    
+                    pred_batch_img, pred_mask = relabel_heatmap(input_now.cpu(), score_map_mask, 'pred') # return an Image object
+
                     if not isdir(relabel_mask_dir):
                         mkdir_p(relabel_mask_dir)
 
@@ -572,6 +564,8 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
                         gt_label_str = "GT : False"
                     elif target_label_now[0][0] == 1:
                         gt_label_str = "GT : True"
+
+                    # print(gt_label_str)
 
                     if round_output_label[0][0] == 0:
                         pred_label_str = "Pred : False"
@@ -590,12 +584,13 @@ def validate(val_loader, model, criterions, num_classes, checkpoint, debug=False
                         pred_win.set_data(pred_batch_img)
                         ax1.title.set_text(gt_label_str)
                         ax2.title.set_text(pred_label_str)
+
                     plt.plot()
                     index_name = "%05d.jpg" % (img_index)
                     plt.savefig(os.path.join(relabel_mask_dir, 'vis_' + index_name))
                     pred_mask.save(os.path.join(relabel_mask_dir, index_name))
                     pred_Image.save(os.path.join(relabel_mask_dir, 'image_' + index_name))
-                    # print(relabel_mask_dir)
+                    # print(os.path.join(relabel_mask_dir, index_name))
                     
             # record final acc
             final_acces.update(sum(final_acc_list) / len(final_acc_list), input.size(0))
@@ -699,9 +694,9 @@ if __name__ == '__main__':
                         help='manual epoch number (useful on restarts)')
 
     # 2 GPU setting
-    parser.add_argument('--train-batch', default=8, type=int, metavar='N',
+    parser.add_argument('--train-batch', default=10, type=int, metavar='N',
                         help='train batchsize')
-    parser.add_argument('--test-batch', default=8, type=int, metavar='N',
+    parser.add_argument('--test-batch', default=10, type=int, metavar='N',
                         help='train batchsize')
 
     # 1 GPU setting
@@ -711,7 +706,7 @@ if __name__ == '__main__':
     #                     help='train batchsize')
 
 
-    parser.add_argument('--lr', '--learning-rate', default=2e-4, type=float,
+    parser.add_argument('--lr', '--learning-rate', default=2e-5, type=float,
                         metavar='LR', help='initial learning rate')
     parser.add_argument('--momentum', default=0, type=float, metavar='M',
                         help='momentum')
