@@ -702,10 +702,10 @@ if __name__ == '__main__':
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                         help='manual epoch number (useful on restarts)')
 
-    # 2 GPU setting
-    # parser.add_argument('--train-batch', default=10, type=int, metavar='N',
+    # 2 GPU setting  + ResNet-50
+    # parser.add_argument('--train-batch', default=16, type=int, metavar='N',
     #                     help='train batchsize')
-    # parser.add_argument('--test-batch', default=10, type=int, metavar='N',
+    # parser.add_argument('--test-batch', default=16, type=int, metavar='N',
     #                     help='train batchsize')
 
     # 1 GPU setting + ResNet-50
