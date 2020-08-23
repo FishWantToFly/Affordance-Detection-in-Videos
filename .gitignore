@@ -1,5 +1,3 @@
-/optical_flow
-/dataset/dataset*
 /dataset_two_steps/dataset*
-/dataset_coco/dataset*
-/backup
+/dataset_coco
+/faster-rcnn.pytorch

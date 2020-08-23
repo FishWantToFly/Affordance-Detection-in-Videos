@@ -1,0 +1,5 @@
+python 1_copy_files.py
+python 2_deal_with_mask.py
+python 3_data_augment.py
+python 4_generate_train_test_list.py
+python attention_generate.py

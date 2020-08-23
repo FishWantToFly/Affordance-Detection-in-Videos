@@ -1,13 +1,22 @@
-# Affordance-Detection-on-Video
----
-2020.2.28 Baseline
+# Affordance-Detection-on-Videos
 
-Model : Hourglass
+### (1) Setup
+* Ubuntu 16.04 + cuda 9.0
+* Python 3.6 + Pytorch 1.2
 
-Input : 256x256 single RGB frame
+### (2) Support Affordance Video Dataset (SAV)
+No download link now.
 
-Output : 64x64 heatmap
+### (3) Data Preprocess (data augmentation, generate data list for train/test)
+```
+cd dataset_two_steps
+sh generate_data.sh
+```
 
-Loss : MSE
-
-Performance : **best iou 73.8** in epoch 54 ??? need to retrain
+### (3) Train/test + evaluation
+```
+cd ../code/train_two_steps
+python main_0807_final.py
+```
+### (5) Visualization
+![Arch Image](https://github.com/FishWantToFly/MTML_pytorch_implementation/blob/master/images/point%20cloud.png)

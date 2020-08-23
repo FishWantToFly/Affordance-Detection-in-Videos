@@ -23,18 +23,34 @@ mask_dir = 'mask'
 action_total = 0
 action_unique_list = []
 action_frames_list = []
-for action in glob.glob("../dataset/dataset_original/*/*/*"):	
-	# count total training action
-	action_total += 1
+action_dict = {}
+for action in glob.glob("../dataset_two_steps/dataset_original/*/*/*"):	
+
 
 	# count unique action and record
 	_, _action = os.path.split(action)
 	x = re.search("_[0-9]+", _action)
 
+	semantic = os.path.basename(os.path.dirname(action)).split('_')[0]
+	if semantic == 'chair' or semantic == 'table' :
+		pass
+	else :
+		continue
+	# print(semantic)
+
+	# count total training action
+	action_total += 1
+
 	if x is not None :
 		_action = _action[:-2]
 	if _action not in action_unique_list:
 		action_unique_list.append(_action)
+
+	if action_dict.get(_action) == None :
+		action_dict[_action] = 1
+	else :
+		temp_num = action_dict[_action]
+		action_dict[_action] = temp_num + 1
 
 	# count frame number of each action
 	action_frames = glob.glob(os.path.join(action, frame_dir, '*'))
@@ -48,9 +64,6 @@ for action in glob.glob("../dataset/dataset_original/*/*/*"):
 		# if not os.path.exists(os.path.join(action, mask_dir)):
 		# 	print(action)
 
-	if _action == 'push_object_down' :
-		print(action)
-
 
 print("\nTotal action number = %d" % (action_total))
 print("Total unique action number = %d" % (len(action_unique_list)))
@@ -62,3 +75,6 @@ print("Total frame number = %d" % (sum(action_frames_list)))
 print("Average frame number = %d" % (statistics.mean(action_frames_list)))
 print("Maximum frame number = %d" % (max(action_frames_list)))
 print("Minimum frame number = %d" % (min(action_frames_list)))
+
+print("=== Action Dict ===")
+print(action_dict)

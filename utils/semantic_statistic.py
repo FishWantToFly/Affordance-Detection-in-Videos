@@ -22,7 +22,7 @@ place_list = ['home_living_room', 'kitchen', 'lab', 'my_room', 'tohoku_lab', \
 	'tohoku_meeting_room', 'tohoku_seminar_room']
 for place in place_list :
 	semantic_dict = {'basket': 0, 'chair': 0, 'plate': 0,'sofa': 0, 'table': 0}
-	for action in glob.glob("../dataset/dataset_original/%s/*/*" % (place)):
+	for action in glob.glob("../dataset_two_steps/dataset_original/%s/*/*" % (place)):
 		semantic = os.path.basename(os.path.dirname(action)).split('_')[0]
 		semantic_dict[semantic] += 1
 	print("Place : %s" % (place))
