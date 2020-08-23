@@ -19,4 +19,4 @@ cd ../code/train_two_steps
 python main_0807_final.py
 ```
 ### (5) Visualization
-![Arch Image](https://github.com/FishWantToFly/MTML_pytorch_implementation/blob/master/images/point%20cloud.png)
+![Arch Image](https://github.com/FishWantToFly/Affordance-Detection-on-Video/blob/master/figs/pred_visualization.png)
