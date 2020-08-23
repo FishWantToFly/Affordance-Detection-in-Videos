@@ -86,7 +86,7 @@ class ConvLSTM(nn.Module):
     """
 
     def __init__(self, input_dim, hidden_dim, kernel_size, num_layers,
-                 batch_first=False, bias=True, return_all_layers=False):
+                 batch_first=False, bias=True, return_all_layers=False, lstm_state='stateful'):
         super(ConvLSTM, self).__init__()
 
         self._check_kernel_size_consistency(kernel_size)
@@ -116,6 +116,13 @@ class ConvLSTM(nn.Module):
 
         self.cell_list = nn.ModuleList(cell_list)
 
+        # 2020.6.29
+        if lstm_state is not None :
+             self.lstm_state = lstm_state
+
+        # self.lstm_state = 'stateless'
+        # self.lstm_state = 'stateful'
+
     def forward(self, input_tensor, input_state=None):
         """
 
@@ -138,26 +145,35 @@ class ConvLSTM(nn.Module):
 
         hidden_state = self._init_hidden(batch_size=b,
                                             image_size=(h, w))
+
         # Implement stateful ConvLSTM
-        if input_state is not None:
+        if input_state is not None and self.lstm_state == 'stateful':
             hidden_state[0] = input_state # feed into first convLSTM
 
         layer_output_list = []
         last_state_list = []
         cur_layer_input = input_tensor
 
+        last_h, last_c = None, None
+
         for layer_idx in range(self.num_layers):
-            h, c = hidden_state[layer_idx]
+            if self.lstm_state == 'stateful' and layer_idx != 0:
+                input_h, input_c = last_h, last_c
+            else :
+                input_h, input_c = hidden_state[layer_idx]
+            
             output_inner = []
+            
 
             h, c = self.cell_list[layer_idx](input_tensor=cur_layer_input,
-                                                cur_state=[h, c])
+                                                cur_state=[input_h, input_c])
 
             layer_output = h
             cur_layer_input = layer_output
 
             layer_output_list.append(layer_output)
             last_state_list.append([h, c])
+            last_h, last_c = h, c
 
         if not self.return_all_layers:
             layer_output_list = layer_output_list[-1:]

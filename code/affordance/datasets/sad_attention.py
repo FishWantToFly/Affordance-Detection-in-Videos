@@ -1,7 +1,9 @@
 '''
-2020.5.20  
-Evaluate step 2 in two_steps 
-Use predicte masks as input to evaluate 
+2020.5.23
+
+Evaluate for step 1 + step 2 
+Step 1 output is pre-generated (from args.mask)
+
 '''
 
 from __future__ import print_function, absolute_import
@@ -21,7 +23,7 @@ from affordance.utils.imutils import *
 from affordance.utils.transforms import *
 
 
-class Sad_step_2_eval(data.Dataset):
+class Sad_attention(data.Dataset):
     def __init__(self, is_train = True, **kwargs):
         self.img_folder = kwargs['image_path'] # root image folders
         self.is_train   = is_train # training set or test set
@@ -29,7 +31,6 @@ class Sad_step_2_eval(data.Dataset):
         self.out_res    = kwargs['out_res']
         self.sigma      = kwargs['sigma']
         self.dataset_list_dir_path = kwargs['dataset_list_dir_path']
-        self.input_mask_dir = kwargs['mask']
 
         self.semantic_dict = {'basket': 0, 'chair': 1, 'plate': 2, 'sofa': 3, 'table': 4}
         self.semantic_len = len(self.semantic_dict)
@@ -60,18 +61,17 @@ class Sad_step_2_eval(data.Dataset):
                 action_list.append(inner_list[0])
 
         image_dir_name = 'raw_frames'
-        # mask_dir_name = 'mask' # gt_mask_dir  #### ???? -> first_mask
-        check_mask_dir_name = 'mask'
-        mask_dir_name = 'first_mask' 
+        mask_dir_name = 'mask' # affordance region
         depth_dir_name = 'inpaint_depth'
         mask_rgb_dir_name = 'mask_rgb'
+
+        attention_heatmap_dir_name = 'attention_mask'
+        # attention_heatmap_dir_name = 'attention_heatmap'
+
         for action in action_list :
             action_rgb_frames = glob.glob(os.path.join(self.img_folder, action, image_dir_name, '*.png'))
-            semantic_name = os.path.basename(os.path.dirname(action)).split('_')[0]
-            semantic_label = self.semantic_dict[semantic_name]
-
+            # print(action.split('/')[2:])
             input_action_path = ('/').join(action.split('/')[1:])
-            # print(input_action_path)
 
             # for video training
             # each time there are 6 feames, overlap = 2 frames
@@ -89,34 +89,22 @@ class Sad_step_2_eval(data.Dataset):
                     frame = sorted_action_rgb_frames[start_frame + i] 
                     frame_name = os.path.basename(frame)
                     frame_dir_dir = os.path.dirname(os.path.dirname(frame))
-                    # here can use gt mask of predcited mask
-                    # gt_mask = os.path.join(frame_dir_dir, mask_dir_name, frame_name[:-4] + '.jpg')
-                    check_mask = os.path.join(frame_dir_dir, check_mask_dir_name, frame_name[:-4] + '.jpg')
+
                     depth = os.path.join(frame_dir_dir, depth_dir_name, frame_name[:-4] + '.npy')
-
-
-                    ## start from here !!!!
-                    input_mask = os.path.join(self.input_mask_dir, input_action_path, frame_name[:-4] + '.jpg')
-
-                    # frame_dir_dir : /home/s5078345/Affordance-Detection-on-Video/dataset_two_steps/./dataset_original/home_living_room/chair_2_angle_2/remove_object_on_it_1
-                    # NEED TO FIND CLASSIFICATION GT FROM dataset_original mask and mask_rgb
-                    # if mask_rgb None : false. if mask_rgb exists image : true
-                    origin_dataset_name = 'dataset_original'
-                    temp_1 = ('/').join(frame_dir_dir.split('/')[0:6])
-                    temp_2 = ('/').join(frame_dir_dir.split('/')[7:])
-                    origin_frame_dir_dir = os.path.join(temp_1, origin_dataset_name, temp_2)
+                    mask = os.path.join(frame_dir_dir, mask_dir_name, frame_name[:-4] + '.jpg')
+                    attention_heatmap = os.path.join(frame_dir_dir, attention_heatmap_dir_name, frame_name[:-4] + '.jpg')
                     mask_rgb = os.path.join(frame_dir_dir, mask_rgb_dir_name, frame_name[:-4] + '.jpg')
-
+                    
+                    # compute affordance label
                     affordance_label = None
-                    if os.path.exists(check_mask) and os.path.exists(mask_rgb) :
+                    if os.path.exists(mask) and os.path.exists(mask_rgb) :
                         affordance_label = True
-                    elif os.path.exists(check_mask) and not os.path.exists(mask_rgb) :
+                    elif os.path.exists(mask) and not os.path.exists(mask_rgb) :
                         affordance_label = False 
                     else :
                         print("Mask got wrong QQ")
 
-                    # temp.append([frame, gt_mask, depth, affordance_label, _index])　# use gt mask as input
-                    temp.append([frame, input_mask, depth, affordance_label, _index]) # use pred mask as input
+                    temp.append([frame, depth, attention_heatmap, mask, affordance_label, _index]) # use pred mask as input
                     
                 all_files.append(temp)
 
@@ -129,6 +117,7 @@ class Sad_step_2_eval(data.Dataset):
         video_len = 6
         mask_path_list = []
         image_index_list = []
+        gt_mask_path_list = []
 
         # img_path, mask_path, depth_path = self.train_list[index]
         if self.is_train:
@@ -138,9 +127,12 @@ class Sad_step_2_eval(data.Dataset):
 
         video_input = torch.zeros(video_len, 3, self.inp_res, self.inp_res)
         video_input_depth = torch.zeros(video_len, 1, self.inp_res, self.inp_res)
-        video_input_mask = torch.zeros(video_len, 1, self.inp_res, self.inp_res)
-        video_target_label = torch.zeros(video_len, 1)
+        video_attention_heatmap = torch.zeros(video_len, 1, self.out_res, self.out_res) # target 
+        video_mask = torch.zeros(video_len, 1, self.out_res, self.out_res) # target
+        video_target_label = torch.zeros(video_len, 1) # target
 
+        #################
+        # Prepare for data augmneatation
         # Occlusion Preprocess (same occlusion for one action)
         random.seed()
         prob_keep_image = random.random()
@@ -161,48 +153,62 @@ class Sad_step_2_eval(data.Dataset):
         height_shift = random.randint(-h_num, h_num)
         w_num = int (self.inp_res / 6)
         width_shift = random.randint(-w_num, w_num)
+        #################
 
         for i in range(video_len):
-            img_path, mask_path, depth_path, affordance_label, _index = video_data[i]
+            img_path, depth_path, heatmap_path, mask_path, affordance_label, _index = video_data[i]
 
             # load image and mask
             img = load_image(img_path)  # CxHxW
-            a = load_mask(mask_path)    # 1xHxW
             depth = load_depth(depth_path)
+            heatmap = load_mask(heatmap_path) # 1xHxW
+            # heatmap = load_attention_heatmap(heatmap_path) # 1xHxW
+            mask = load_mask(mask_path)    # 1xHxW
             
             nparts = 1 # should change if target is more than 2
 
             # Prepare image and groundtruth map
-            # inp = crop(img, c, s, [self.inp_res, self.inp_res], rot=r)
             inp = resize(img, self.inp_res, self.inp_res) # get normalized rgb value
             input_depth = resize(depth, self.inp_res, self.inp_res)
-            # Generate input mask
-            input_mask = torch.zeros(nparts, self.inp_res, self.inp_res) # [1, out_res, out_res]
-            _input_mask = a[0] # HxW
-            _input_mask = resize(_input_mask, self.inp_res, self.inp_res) # [inp_res, inp_res]
 
+            target_heatmap = torch.zeros(nparts, self.out_res, self.out_res)
+            _target_heatmap = heatmap[0]
+            _target_heatmap = resize(_target_heatmap, self.inp_res, self.inp_res) # [inp_res, inp_res]
+
+            # Generate target mask 
+            target_mask = torch.zeros(nparts, self.out_res, self.out_res) # [1, out_res, out_res]
+            _target_mask = mask[0] # HxW
+            _target_mask = resize(_target_mask, self.inp_res, self.inp_res) # [out_res, out_res]
 
             ######################################################
             # Data augmentation 
             # Occlusion (Stochastic Cutout occlusions)
+            # '''
             if self.is_train == True and KEEP_IMAGE == False :
                 for x in range(S_num):
                     for y in range(S_num):
                         if occlusion_map[x][y] == 0 :
                             inp[:, x*S : x*S + S, y*S : y*S + S] = 0
                             input_depth[x*S : x*S + S, y*S : y*S + S] = 0
-                            _input_mask[x*S : x*S + S, y*S : y*S + S] = 0 
+                            _target_heatmap[x*S : x*S + S, y*S : y*S + S] = 0 
+                            _target_mask[x*S : x*S + S, y*S : y*S + S] = 0 
 
             # Random shift
             if self.is_train == True :
                 if random_shift_prob > 0.5 :
-                    inp, _input_mask, input_depth = self.random_shift(inp, _input_mask, input_depth, h_num, w_num)
-            input_mask[0] = _input_mask
+                    inp, _target_mask, input_depth, _target_heatmap = \
+                        self.random_shift(inp, _target_mask, input_depth, _target_heatmap, h_num, w_num)
+            # '''
+
             ##############################################
             # Output
+            target_heatmap[0] = resize(_target_heatmap, self.out_res, self.out_res) # resize from 256x256 -> 64x64
+            target_mask[0] = resize(_target_mask, self.out_res, self.out_res) # resize from 256x256 -> 64x64
+
             video_input[i] = inp
             video_input_depth[i] = input_depth
-            video_input_mask[i] = input_mask
+            video_attention_heatmap[i] = target_heatmap
+            video_mask[i] = target_mask
             if affordance_label == True :
                 video_target_label[i] = torch.tensor([1.])
             else :
@@ -214,15 +220,16 @@ class Sad_step_2_eval(data.Dataset):
         # Meta info
         meta = {'index': index, 'mask_path_list': mask_path_list, 'image_index_list' : image_index_list}
         
-        return video_input, video_input_depth, video_input_mask, video_target_label, meta
+        return video_input, video_input_depth, video_attention_heatmap, video_mask, video_target_label, meta
 
-    def random_shift(self, img, mask, depth, height_shift, width_shift):
+    def random_shift(self, img, mask, depth, heatmap, height_shift, width_shift):
         IMG_HEIGHT = self.inp_res
         IMG_WIDTH = self.inp_res
 
         shift_img = torch.zeros_like(img)
         shift_mask = torch.zeros_like(mask)
         shift_depth = torch.zeros_like(depth)
+        shift_heatmap = torch.zeros_like(heatmap)
 
         if height_shift >= 0 and width_shift >= 0:
             shift_img[:, height_shift:IMG_HEIGHT, width_shift:IMG_WIDTH] = img[:, 0: (IMG_HEIGHT - height_shift), \
@@ -231,12 +238,16 @@ class Sad_step_2_eval(data.Dataset):
                 0: (IMG_WIDTH - width_shift)]
             shift_depth[:, height_shift:IMG_HEIGHT, width_shift:IMG_WIDTH] = depth[:, 0: (IMG_HEIGHT - height_shift), \
                 0: (IMG_WIDTH - width_shift)]
+            shift_heatmap[:, height_shift:IMG_HEIGHT, width_shift:IMG_WIDTH] = depth[:, 0: (IMG_HEIGHT - height_shift), \
+                0: (IMG_WIDTH - width_shift)]
         elif height_shift < 0 and width_shift >= 0:
             shift_img[:, 0:(IMG_HEIGHT + height_shift), width_shift:IMG_WIDTH] = img[:, -height_shift: IMG_HEIGHT, \
                 0: (IMG_WIDTH - width_shift)]
             shift_mask[:, 0:(IMG_HEIGHT + height_shift), width_shift:IMG_WIDTH] = mask[:, -height_shift: IMG_HEIGHT, \
                 0: (IMG_WIDTH - width_shift)]
             shift_depth[:, 0:(IMG_HEIGHT + height_shift), width_shift:IMG_WIDTH] = depth[:, -height_shift: IMG_HEIGHT, \
+                0: (IMG_WIDTH - width_shift)]
+            shift_heatmap[:, 0:(IMG_HEIGHT + height_shift), width_shift:IMG_WIDTH] = depth[:, -height_shift: IMG_HEIGHT, \
                 0: (IMG_WIDTH - width_shift)]
         elif height_shift >= 0 and width_shift < 0:
             shift_img[:, height_shift:IMG_HEIGHT, 0:(IMG_WIDTH + width_shift)] = img[:, 0: (IMG_HEIGHT - height_shift), \
@@ -245,6 +256,8 @@ class Sad_step_2_eval(data.Dataset):
                 -width_shift: IMG_WIDTH]
             shift_depth[:, height_shift:IMG_HEIGHT, 0:(IMG_WIDTH + width_shift)] = depth[:, 0: (IMG_HEIGHT - height_shift), \
                 -width_shift: IMG_WIDTH]
+            shift_heatmap[:, height_shift:IMG_HEIGHT, 0:(IMG_WIDTH + width_shift)] = depth[:, 0: (IMG_HEIGHT - height_shift), \
+                -width_shift: IMG_WIDTH]
         elif height_shift < 0 and width_shift < 0:
             shift_img[:, 0:(IMG_HEIGHT + height_shift), 0:(IMG_WIDTH + width_shift)] = img[:, 0: (IMG_HEIGHT + height_shift), \
                 0: (IMG_WIDTH + width_shift)]
@@ -252,7 +265,9 @@ class Sad_step_2_eval(data.Dataset):
                 0: (IMG_WIDTH + width_shift)]
             shift_depth[:, 0:(IMG_HEIGHT + height_shift), 0:(IMG_WIDTH + width_shift)] = depth[:, 0: (IMG_HEIGHT + height_shift), \
                 0: (IMG_WIDTH + width_shift)]
-        return shift_img, shift_mask, shift_depth
+            shift_heatmap[:, 0:(IMG_HEIGHT + height_shift), 0:(IMG_WIDTH + width_shift)] = depth[:, 0: (IMG_HEIGHT + height_shift), \
+                0: (IMG_WIDTH + width_shift)]
+        return shift_img, shift_mask, shift_depth, shift_heatmap
 
     def __len__(self):
         if self.is_train:
@@ -260,7 +275,7 @@ class Sad_step_2_eval(data.Dataset):
         else:
             return len(self.valid_list)
 
-def sad_step_2_eval(**kwargs):
-    return Sad_step_2_eval(**kwargs)
+def sad_attention(**kwargs):
+    return Sad_attention(**kwargs)
 
-sad_step_2_eval.njoints = 1  # ugly but works
+sad_attention.njoints = 1  # ugly but works

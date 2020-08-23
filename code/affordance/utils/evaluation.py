@@ -96,7 +96,7 @@ def final_preds(output, center, scale, res):
 
     return preds
 
-def intersectionOverUnion(output, target, idxs, return_list = None):
+def intersectionOverUnion(output, target, idxs, return_list = None, mode = None):
     ''' 
     Calculate IoU
     output : Batch * Class * W * H
@@ -109,8 +109,11 @@ def intersectionOverUnion(output, target, idxs, return_list = None):
     # np.save("target.npy", target)
     num_classes = target.shape[-1]
     THRESHOLD = 0.5
-    y_pred = (target > THRESHOLD).astype(int)
-    y_true = (output == 1).astype(int) # 2020.3.1 debug
+    y_pred = (output > THRESHOLD).astype(int)
+    if mode == 'heatmap' : 
+        y_true = (target > THRESHOLD).astype(int)
+    else :
+        y_true = (target == 1).astype(int) # normal
 
     axes = (1,2) # W,H axes of each image
     intersection = np.sum(np.abs(y_pred * y_true), axis=axes) # or, np.logical_and(y_pred, y_true) for one-hot # shape = [Batch]

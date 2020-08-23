@@ -7,6 +7,8 @@ import scipy.misc
 from PIL import Image
 
 from .misc import *
+import copy, math
+import torch.nn.functional as F
 
 def im_to_numpy(img):
     img = to_numpy(img)
@@ -29,6 +31,11 @@ def load_image(img_path):
     # H x W x C => C x H x W
     img = np.array(Image.open(img_path))
     return im_to_torch_no_normalize(img)
+
+def load_attention_heatmap(heatmap_path) :
+    heatmap = np.array(Image.open(heatmap_path))
+    heatmap = np.expand_dims(heatmap, -1) # H x W -> H x W X 1
+    return im_to_torch(heatmap) #  H x W X 1 -> 1 x H x W
 
 def load_mask(mask_path):
     # H x W x C => C x H x W
@@ -69,6 +76,11 @@ def resize(img, owidth, oheight):  # CxHxW -> HxWxC
     img = np.asarray(img, dtype = np.uint8)
 
     ## Future work
+
+    # scipy.misc.imresize ?
+
+    # img = F.interpolate()
+
     ## Use F.interpolate to replace
     img = np.array(Image.fromarray(img).resize((owidth, oheight)))
 
@@ -250,8 +262,12 @@ def color_heatmap_relabel(x, mode):
     color = (color * 255).astype(np.uint8)
     return color
 
-
-def relabel_with_heatmap(inp, out, mode, num_rows=2, parts_to_show=None):
+### FINAL
+def relabel_with_heatmap(inp, out, mode, area_to_detect=None, num_rows=2):
+    '''
+    area_to_detect : [[x_min, y_min, x_max, y_max]
+                        ...] for 640 x 480 image
+    '''
     inp = to_numpy(inp * 255) # [3, 256, 256]
     out = to_numpy(out) # [1, 64, 64]
 
@@ -270,31 +286,65 @@ def relabel_with_heatmap(inp, out, mode, num_rows=2, parts_to_show=None):
 
     part_idx = 0
     out_resized = np.array(Image.fromarray(out[part_idx]).resize((size, size))) # [256, 256]
-    out_resized = out_resized.astype(float)/255
+    out_resized = out_resized.astype(float)
     
     # print(out_resized.shape) # 256 256
+    # print(out_resized[out_resized > 0.5])
+    
+    '''
+    # 2020.7.1
+    ## use area_to_detect to occlude other area
+    if area_to_detect is not None :
+        out_resized_area = np.zeros((size, size))
+        for i in range(len(area_to_detect)):
+            x_min, y_min, x_max, y_max = area_to_detect[i]
+            # x_min = 640 - x_max
+            # y_min = 480 - y_max
+            # x_max = 640 - x_min
+            # y_max = 480 - y_min
+            
+            # from (640 480) -> (256 256)
+            x_min = math.floor(x_min / 640 * 255)
+            y_min = math.floor(y_min / 480 * 255)
+            x_max = math.ceil(x_max / 640 * 255)
+            y_max = math.ceil(y_max / 480 * 255)
+
+            # direction is differnt. one is x, y, another is y, x
+            out_resized_area[y_min:y_max, x_min:x_max] = out_resized[y_min:y_max, x_min:x_max]
+
+        out_resized = copy.deepcopy(out_resized_area)
+    '''
+
+
 
     color_hm_relabel = color_heatmap_relabel(out_resized, mode)
     output_mask = color_hm_relabel.copy()
 
-    color_hm = color_heatmap(out_resized, mode)
-    out_img = inp_small.copy() * .99
-    out_img += color_hm * .7
+    # old 
+    # color_hm = color_heatmap(out_resized, mode)
+    # out_img = inp_small.copy() * .99
+    # out_img += color_hm * .7
+
+    # new
+    inp_small = np.asarray(inp_small, dtype = np.uint8) # [256, 256, 3] # [256, 256]
+    out_img = eval_image_plus_mask(inp_small, out_resized, mode)
     out_img = np.asarray(out_img, dtype = np.uint8)
 
     full_img = Image.fromarray(out_img).resize((640, 480))
     output_mask = Image.fromarray(output_mask).resize((640, 480))
 
+        
     full_img = np.array(full_img)
     full_img = np.asarray(full_img, np.uint8)
+
     # output_mask = np.array(output_mask)
     # output_mask = np.asarray(output_mask, np.uint8)
 
     return full_img, output_mask
 
-def relabel_heatmap(inputs, outputs, mode, mean=torch.Tensor([0.5, 0.5, 0.5]).cuda(), num_rows=2, parts_to_show=None):
+def relabel_heatmap(inputs, outputs, mode, mean=torch.Tensor([0.5, 0.5, 0.5]).cuda(), area_to_detect=None, num_rows=2):
     inp = inputs[0]
-    return relabel_with_heatmap(inp.clamp(0, 1), outputs[0], mode, num_rows=num_rows, parts_to_show=parts_to_show)
+    return relabel_with_heatmap(inp.clamp(0, 1), outputs[0], mode, area_to_detect=area_to_detect, num_rows=num_rows)
 
 ##############
 # Eval
@@ -302,11 +352,10 @@ def relabel_heatmap(inputs, outputs, mode, mean=torch.Tensor([0.5, 0.5, 0.5]).cu
 
 def eval_image_plus_mask(img, mask, mode):
     mask = to_numpy(mask) # 256x256
-    if mode == 'gt' :
-        gt_pos = (mask != 0).nonzero()
-        # print(gt_pos)
-    elif mode == 'pred' :
-        pass
+    if mode == 'pred' :
+        gt_pos = (mask >= 0.5).nonzero() # checked
+    elif mode == 'gt' :
+        gt_pos = (mask >= 0.5).nonzero()
         # x = x * 255 # because x is normalized before
         # gt_pos = (x >= 0.5).nonzero() # have to exceed threshold
     pos_0, pos_1 = gt_pos
@@ -333,12 +382,16 @@ def eval_heatmap(inp, out):
     img = np.asarray(inp, np.uint8)
     size = img.shape[0] # 256
 
-    full_img = np.zeros((640, 480, 3), np.uint8)
+    # full_img = np.zeros((640, 480, 3), np.uint8)
     inp_small = img
 
     out_resized = out.astype(float)/255
 
-    out_img = eval_image_plus_mask(inp_small, out_resized, 'gt')
+    '''
+    inp_small [256, 256, 3] np.uint8
+    out_resized [256, 256] float
+    '''
+    out_img = eval_image_plus_mask(inp_small, out_resized, 'pred')
     out_img = np.asarray(out_img, dtype = np.uint8)
 
     full_img = Image.fromarray(out_img).resize((640, 480))
@@ -347,3 +400,12 @@ def eval_heatmap(inp, out):
     full_img = np.asarray(full_img, np.uint8)
 
     return full_img
+
+#########
+# 2020.7.6
+# for faster rcnn bbox crop
+def faster_rcnn_crop(output, x_len, y_len):
+    output = np.array(output[0]) # [32, 32]
+    resized_output = np.array(Image.fromarray(output).resize((x_len, y_len)))
+    resized_output = to_torch(resized_output).float()
+    return resized_output
