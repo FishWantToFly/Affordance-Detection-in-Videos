@@ -19,7 +19,7 @@ cd dataset_two_steps
 sh generate_data.sh
 ```
 
-### () Train/test + evaluation
+### (4) Train/test + evaluation
 ```
 cd ../code/train_two_steps
 python main_0807_final.py
